@@ -12,6 +12,7 @@
 9. [Routing in Express](#routing-in-express)
 10. [Middleware](#middleware)
 11. [Project Structure](#project-structure)
+12. [Common Project Structures](#common-project-structures)
 
 ---
 
@@ -777,6 +778,166 @@ node_modules/
 .env
 *.log
 ```
+
+---
+
+## Common Project Structures
+
+As projects grow, you need a consistent way to organize your code. Here are the most common folder structures used in real-world Node.js/Express applications.
+
+### Small Projects (Beginner)
+
+For learning or small APIs with just a few routes:
+
+```
+my-app/
+├── src/
+│   ├── routes/
+│   │   ├── users.js
+│   │   └── products.js
+│   └── index.js
+├── .gitignore
+├── package.json
+└── README.md
+```
+
+**When to use:** Learning, prototypes, APIs with 2-5 routes
+
+### Medium Projects (MVC Pattern)
+
+MVC stands for Model-View-Controller. It separates your code into three layers:
+
+- **Models** — data structure and database logic
+- **Views** — what the user sees (not needed for APIs)
+- **Controllers** — business logic (what happens when a route is hit)
+
+```
+my-app/
+├── src/
+│   ├── controllers/
+│   │   ├── userController.js      # business logic for users
+│   │   └── productController.js
+│   ├── models/
+│   │   ├── User.js                # user data structure
+│   │   └── Product.js
+│   ├── routes/
+│   │   ├── userRoutes.js          # just route definitions
+│   │   └── productRoutes.js
+│   ├── middlewares/
+│   │   ├── auth.js                # authentication middleware
+│   │   └── errorHandler.js        # error handling middleware
+│   ├── config/
+│   │   └── database.js            # database connection
+│   └── index.js
+├── .env
+├── .gitignore
+├── package.json
+└── README.md
+```
+
+**When to use:** Most production apps, teams of 2-10 developers
+
+**How it works:**
+
+1. **Route** receives the request → calls a **Controller** function
+2. **Controller** contains the logic → talks to the **Model** if needed
+3. **Model** handles database operations → returns data to Controller
+4. **Controller** sends response back to client
+
+**Example flow:**
+
+```
+GET /users/42
+  ↓
+routes/userRoutes.js → calls userController.getUser()
+  ↓
+controllers/userController.js → calls User.findById(42)
+  ↓
+models/User.js → queries database
+  ↓
+returns user data → controller sends response
+```
+
+### Large Projects (Feature-Based)
+
+For large teams or complex apps, organize by **feature** instead of by type:
+
+```
+my-app/
+├── src/
+│   ├── features/
+│   │   ├── users/
+│   │   │   ├── user.model.js
+│   │   │   ├── user.controller.js
+│   │   │   ├── user.routes.js
+│   │   │   └── user.service.js     # reusable business logic
+│   │   ├── products/
+│   │   │   ├── product.model.js
+│   │   │   ├── product.controller.js
+│   │   │   ├── product.routes.js
+│   │   │   └── product.service.js
+│   │   └── orders/
+│   │       ├── order.model.js
+│   │       ├── order.controller.js
+│   │       ├── order.routes.js
+│   │       └── order.service.js
+│   ├── shared/
+│   │   ├── middlewares/
+│   │   │   ├── auth.js
+│   │   │   └── errorHandler.js
+│   │   ├── utils/
+│   │   │   ├── logger.js
+│   │   │   └── validator.js
+│   │   └── config/
+│   │       ├── database.js
+│   │       └── env.js
+│   └── index.js
+├── tests/
+│   ├── users.test.js
+│   └── products.test.js
+├── .env
+├── .gitignore
+├── package.json
+└── README.md
+```
+
+**When to use:** Large teams (10+ developers), microservices, apps with 20+ features
+
+**Benefits:**
+- Everything related to "users" is in one folder
+- Easy to find and modify features
+- Teams can work on different features without conflicts
+- Easy to extract a feature into its own microservice later
+
+### Folder Explanations
+
+| Folder | What goes here |
+|--------|----------------|
+| `routes/` | Route definitions only — no logic, just map URLs to controllers |
+| `controllers/` | Business logic — what happens when a route is hit |
+| `models/` | Data structure and database queries |
+| `services/` | Reusable business logic that multiple controllers might need |
+| `middlewares/` | Functions that run before routes (auth, logging, validation) |
+| `config/` | Configuration files (database, environment variables) |
+| `utils/` or `helpers/` | Utility functions (date formatting, string manipulation) |
+| `tests/` | Test files |
+| `public/` | Static files (images, CSS, HTML) if serving a frontend |
+
+### Which Structure Should You Use?
+
+| Project Size | Structure | Why |
+|--------------|-----------|-----|
+| Learning / Small API | Simple (routes + index) | Easy to understand, no overhead |
+| Medium API (5-20 routes) | MVC Pattern | Industry standard, scales well |
+| Large API (20+ routes) | Feature-Based | Easier to navigate, team-friendly |
+| Microservices | Feature-Based | Each feature can become its own service |
+
+### Key Principles (Apply to All Structures)
+
+1. **Separation of Concerns** — routes don't contain logic, controllers don't query databases directly
+2. **DRY (Don't Repeat Yourself)** — reusable code goes in services or utils
+3. **Single Responsibility** — each file does one thing well
+4. **Consistent Naming** — use plural for routes (`users.js`), singular for models (`User.js`)
 
 ---
 
