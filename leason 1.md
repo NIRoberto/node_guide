@@ -7,10 +7,11 @@
 4. [NPM Basics](#npm-basics)
 5. [Node.js Modules](#nodejs-modules)
 6. [Your First Node.js App](#your-first-nodejs-app)
-7. [Introduction to Express](#introduction-to-express)
-8. [Routing in Express](#routing-in-express)
-9. [Middleware](#middleware)
-10. [Project Structure](#project-structure)
+7. [What is REST?](#what-is-rest)
+8. [Introduction to Express](#introduction-to-express)
+9. [Routing in Express](#routing-in-express)
+10. [Middleware](#middleware)
+11. [Project Structure](#project-structure)
 
 ---
 
@@ -358,6 +359,163 @@ This works, but notice how much manual work is involved — setting headers, han
 
 ---
 
+## What is REST?
+
+Before jumping into Express and building APIs, you need to understand REST — because almost every API you'll build or consume follows it.
+
+### REST stands for Representational State Transfer
+
+That sounds complicated, but the idea is simple. REST is a **set of rules** for how a client (like a mobile app or browser) and a server should communicate over the internet.
+
+It's not a library or a framework — it's just a convention. A way of agreeing on how requests and responses should be structured so that any client can talk to any server.
+
+### The Client-Server Model
+
+REST is built on the idea that there are two separate sides:
+
+- **Client** — the one making requests (browser, mobile app, Postman)
+- **Server** — the one responding with data
+
+They communicate over **HTTP**, the same protocol your browser uses to load websites.
+
+```
+Client                        Server
+  |                              |
+  |  GET /listings               |
+  | ---------------------------> |
+  |                              |
+  |  200 OK + JSON data          |
+  | <--------------------------- |
+  |                              |
+```
+
+### Resources
+
+In REST, everything is a **resource**. A resource is just a thing your API manages — a user, a listing, a product, an order.
+
+Each resource has its own URL:
+
+```
+/users          → the users resource
+/listings       → the listings resource
+/orders         → the orders resource
+/users/42       → a specific user with id 42
+```
+
+The URL tells you **what** you're working with. The HTTP method tells you **what action** you're performing on it.
+
+### HTTP Methods — The Actions
+
+REST uses HTTP methods to describe what you want to do with a resource:
+
+| Method | Action | Example |
+|--------|--------|---------|
+| GET | Read / retrieve data | Get all listings |
+| POST | Create new data | Create a new listing |
+| PUT | Replace / update data | Update a listing fully |
+| PATCH | Partially update data | Update only the price |
+| DELETE | Delete data | Delete a listing |
+
+This combination of URL + method is what makes REST predictable. Any developer looking at `DELETE /users/5` immediately knows what it does — no documentation needed.
+
+### REST is Stateless
+
+This is one of the core rules of REST. **Stateless** means the server does not remember anything about previous requests.
+
+Every request must contain all the information the server needs to process it. The server doesn't store session data between requests.
+
+**Analogy:** Think of a vending machine. Every time you use it, you insert money and make a selection. The machine doesn't remember you from last time. Each interaction is completely independent.
+
+This is why APIs use things like **tokens** (JWT) — because the client has to send its identity with every single request since the server doesn't remember who you are.
+
+### What is JSON?
+
+REST APIs almost always send and receive data in **JSON** (JavaScript Object Notation). It's a lightweight text format that's easy for both humans and machines to read.
+
+```json
+{
+  "id": "1",
+  "title": "Cozy apartment in downtown",
+  "location": "New York, NY",
+  "pricePerNight": 120,
+  "guests": 2
+}
+```
+
+When a client sends a POST request to create a listing, it sends JSON in the request body. When the server responds, it sends JSON back. Express makes this easy with `express.json()` middleware and `res.json()`.
+
+### RESTful URL Design
+
+Good REST API URLs follow a consistent pattern. Here are the rules:
+
+- Use **nouns**, not verbs — the method already describes the action
+- Use **plural** names for collections
+- Use **lowercase** and hyphens, not camelCase
+
+```
+✅ Good
+GET    /listings          → get all listings
+GET    /listings/1        → get listing with id 1
+POST   /listings          → create a new listing
+PUT    /listings/1        → update listing with id 1
+DELETE /listings/1        → delete listing with id 1
+
+❌ Bad
+GET    /getListings
+POST   /createNewListing
+GET    /listing/get/1
+```
+
+### HTTP Status Codes
+
+The server always responds with a **status code** that tells the client what happened. You've already seen these in browsers — 404 means page not found, 500 means something crashed.
+
+| Code | Meaning | When to use |
+|------|---------|-------------|
+| 200 | OK | Request succeeded |
+| 201 | Created | New resource was created (POST) |
+| 204 | No Content | Success but nothing to return (DELETE) |
+| 400 | Bad Request | Client sent invalid data |
+| 401 | Unauthorized | Not logged in |
+| 403 | Forbidden | Logged in but not allowed |
+| 404 | Not Found | Resource doesn't exist |
+| 500 | Internal Server Error | Something broke on the server |
+
+Using the right status code matters. It tells the client exactly what happened so it can react accordingly — show an error message, redirect, retry, etc.
+
+### Putting It Together
+
+Here's what a full REST interaction looks like for creating a listing:
+
+```
+Client sends:
+  POST /listings
+  Content-Type: application/json
+
+  {
+    "title": "Studio in Brooklyn",
+    "location": "Brooklyn, NY",
+    "pricePerNight": 95,
+    "guests": 1
+  }
+
+Server responds:
+  201 Created
+  Content-Type: application/json
+
+  {
+    "id": "4",
+    "title": "Studio in Brooklyn",
+    "location": "Brooklyn, NY",
+    "pricePerNight": 95,
+    "guests": 1
+  }
+```
+
+This is exactly the pattern you'll follow when building Express APIs.
+
+---
+
 ## Introduction to Express
 
 ### What is Express?
@@ -561,7 +719,6 @@ app.get('/', (req, res) => {
   res.send('Hello!');
 });
 ```
-
 ---
 
 ## Project Structure
@@ -633,6 +790,12 @@ node_modules/
 | NPM | Package manager — installs and manages third-party code |
 | package.json | Config file that tracks your project's packages and scripts |
 | node_modules | Folder where installed packages live (don't commit to Git) |
+| REST | A set of rules for how clients and servers communicate over HTTP |
+| Resource | A thing your API manages (user, listing, order) — represented by a URL |
+| HTTP Methods | GET, POST, PUT, PATCH, DELETE — describe the action on a resource |
+| Stateless | Every request must carry all info the server needs — server remembers nothing |
+| JSON | Data format used to send and receive data in REST APIs |
+| Status Codes | Numbers that tell the client what happened (200, 201, 404, 500) |
 | Express | Web framework that simplifies building servers and APIs |
 | Route | A URL + HTTP method combination that triggers a handler |
 | Middleware | Functions that run between request and response |
