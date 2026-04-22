@@ -10,7 +10,19 @@ Use only in-memory data (a plain array) — no database needed. Focus on applyin
 
 ## What You're Building
 
-A REST API for property listings with the following endpoints:
+Two resources: **Users** and **Listings**. Each has its own model, controller, and routes file.
+
+### Users Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/users` | Get all users |
+| GET | `/users/:id` | Get a single user by ID |
+| POST | `/users` | Create a new user |
+| PUT | `/users/:id` | Update an existing user |
+| DELETE | `/users/:id` | Delete a user |
+
+### Listings Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -34,11 +46,14 @@ A REST API for property listings with the following endpoints:
 airbnb-api/
 ├── src/
 │   ├── controllers/
-│   │   └── listings.controller.js   # business logic (what happens when a route is hit)
+│   │   ├── users.controller.js      # business logic for users
+│   │   └── listings.controller.js   # business logic for listings
 │   ├── models/
-│   │   └── listing.model.js         # data structure and in-memory data
+│   │   ├── user.model.js            # user data structure and in-memory array
+│   │   └── listing.model.js         # listing data structure and in-memory array
 │   ├── routes/
-│   │   └── listings.routes.js       # route definitions only — maps URLs to controllers
+│   │   ├── users.routes.js          # maps user URLs to controllers
+│   │   └── listings.routes.js       # maps listing URLs to controllers
 │   └── index.js                     # app entry point
 ├── package.json
 └── .gitignore
@@ -50,30 +65,49 @@ airbnb-api/
 
 ## Requirements
 
+### models/user.model.js
+
+- Create an array of at least 3 user objects
+- Each user should have: `id`, `name`, `email`, `username`
+- Export the array so other files can use it
+
 ### models/listing.model.js
 
 - Create an array of at least 3 listing objects
 - Each listing should have: `id`, `title`, `location`, `pricePerNight`, `guests`
 - Export the array so other files can use it
 
+### controllers/users.controller.js
+
+- Export one function per route: `getAllUsers`, `getUserById`, `createUser`, `updateUser`, `deleteUser`
+- For GET by ID, PUT, and DELETE — return a `404` if the user doesn't exist
+- For POST — return a `400` if any required field is missing
+- For POST — respond with `201` status and the newly created user
+
 ### controllers/listings.controller.js
 
 - Export one function per route: `getAllListings`, `getListingById`, `createListing`, `updateListing`, `deleteListing`
-- Each function contains the actual logic (finding, creating, updating, deleting)
 - For GET by ID, PUT, and DELETE — return a `404` if the listing doesn't exist
 - For POST — return a `400` if any required field is missing
 - For POST — respond with `201` status and the newly created listing
 
+### routes/users.routes.js
+
+- Create an Express Router
+- Map each user route to its corresponding controller function — no logic here
+- Export the router
+
 ### routes/listings.routes.js
 
 - Create an Express Router
-- Map each route to its corresponding controller function — no logic here
+- Map each listing route to its corresponding controller function — no logic here
 - Export the router
 
 ### index.js
 
 - Create the Express app
 - Apply the JSON middleware so the server can read request bodies
+- Mount the users router under `/users`
 - Mount the listings router under `/listings`
 - Add a catch-all `404` handler for routes that don't exist
 - Start the server on port `3000`
@@ -84,11 +118,22 @@ airbnb-api/
 
 ---
 
-## Listing Fields
+## Data Fields
+
+### User
 
 | Field | Type | Required |
 |-------|------|----------|
-| id | string | yes (auto-generated) |
+| id | number | yes (auto-generated) |
+| name | string | yes |
+| email | string | yes |
+| username | string | yes |
+
+### Listing
+
+| Field | Type | Required |
+|-------|------|----------|
+| id | number | yes (auto-generated) |
 | title | string | yes |
 | location | string | yes |
 | pricePerNight | number | yes |
@@ -110,9 +155,10 @@ Test all your endpoints using [Postman](https://www.postman.com/) or any REST cl
 ## What You Should Practice
 
 - Setting up an Express project from scratch
-- Organizing code into separate files (routes, data, entry point)
+- Organizing code into separate files following MVC
 - Handling all HTTP methods: GET, POST, PUT, DELETE
 - Reading from `req.params` and `req.body`
 - Returning proper HTTP status codes
 - Using guard clauses to handle errors early
 - Using `express.Router()` to keep routes modular
+- Managing multiple resources in the same project
