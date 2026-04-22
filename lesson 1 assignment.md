@@ -128,6 +128,10 @@ airbnb-api/
 | name | string | yes |
 | email | string | yes |
 | username | string | yes |
+| phone | string | yes |
+| role | `"host"` \| `"guest"` | yes |
+| avatar | string (URL) | no |
+| bio | string | no |
 
 ### Listing
 
@@ -135,9 +139,14 @@ airbnb-api/
 |-------|------|----------|
 | id | number | yes (auto-generated) |
 | title | string | yes |
+| description | string | yes |
 | location | string | yes |
 | pricePerNight | number | yes |
 | guests | number | yes |
+| type | `"apartment"` \| `"house"` \| `"villa"` \| `"cabin"` | yes |
+| amenities | string[] | yes |
+| rating | number (0-5) | no |
+| host | string | yes |
 
 ---
 
