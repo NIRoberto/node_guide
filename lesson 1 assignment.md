@@ -38,24 +38,26 @@ Two resources: **Users** and **Listings**. Each has its own model, controller, a
 
 1. Create a new folder called `airbnb-api` and initialize it with NPM
 2. Install `express` as a production dependency
-3. Install `nodemon` as a dev dependency
+3. Install `tsx` and `@types/express` as dev dependencies
 4. Add `dev` and `start` scripts to `package.json`
-5. Create a `src/` folder following the **MVC folder structure** — the most common and industry-standard pattern for Node.js/Express apps:
+5. Create a `tsconfig.json` for TypeScript configuration
+6. Create a `src/` folder following the **MVC folder structure** — the most common and industry-standard pattern for Node.js/Express apps:
 
 ```
 airbnb-api/
 ├── src/
 │   ├── controllers/
-│   │   ├── users.controller.js      # business logic for users
-│   │   └── listings.controller.js   # business logic for listings
+│   │   ├── users.controller.ts      # business logic for users
+│   │   └── listings.controller.ts   # business logic for listings
 │   ├── models/
-│   │   ├── user.model.js            # user data structure and in-memory array
-│   │   └── listing.model.js         # listing data structure and in-memory array
+│   │   ├── user.model.ts            # user data structure and in-memory array
+│   │   └── listing.model.ts         # listing data structure and in-memory array
 │   ├── routes/
-│   │   ├── users.routes.js          # maps user URLs to controllers
-│   │   └── listings.routes.js       # maps listing URLs to controllers
-│   └── index.js                     # app entry point
+│   │   ├── users.routes.ts          # maps user URLs to controllers
+│   │   └── listings.routes.ts       # maps listing URLs to controllers
+│   └── index.ts                     # app entry point
 ├── package.json
+├── tsconfig.json
 └── .gitignore
 ```
 
@@ -65,45 +67,45 @@ airbnb-api/
 
 ## Requirements
 
-### models/user.model.js
+### models/user.model.ts
 
-- Create an array of at least 3 user objects
-- Each user should have: `id`, `name`, `email`, `username`
-- Export the array so other files can use it
+- Define and export a `User` interface with all required fields
+- Create and export an in-memory array of at least 3 user objects typed as `User[]`
 
-### models/listing.model.js
+### models/listing.model.ts
 
-- Create an array of at least 3 listing objects
-- Each listing should have: `id`, `title`, `location`, `pricePerNight`, `guests`
-- Export the array so other files can use it
+- Define and export a `Listing` interface with all required fields
+- Create and export an in-memory array of at least 3 listing objects typed as `Listing[]`
 
-### controllers/users.controller.js
+### controllers/users.controller.ts
 
+- Import `Request` and `Response` types from express
 - Export one function per route: `getAllUsers`, `getUserById`, `createUser`, `updateUser`, `deleteUser`
 - For GET by ID, PUT, and DELETE — return a `404` if the user doesn't exist
 - For POST — return a `400` if any required field is missing
 - For POST — respond with `201` status and the newly created user
 
-### controllers/listings.controller.js
+### controllers/listings.controller.ts
 
+- Import `Request` and `Response` types from express
 - Export one function per route: `getAllListings`, `getListingById`, `createListing`, `updateListing`, `deleteListing`
 - For GET by ID, PUT, and DELETE — return a `404` if the listing doesn't exist
 - For POST — return a `400` if any required field is missing
 - For POST — respond with `201` status and the newly created listing
 
-### routes/users.routes.js
+### routes/users.routes.ts
 
 - Create an Express Router
 - Map each user route to its corresponding controller function — no logic here
 - Export the router
 
-### routes/listings.routes.js
+### routes/listings.routes.ts
 
 - Create an Express Router
 - Map each listing route to its corresponding controller function — no logic here
 - Export the router
 
-### index.js
+### index.ts
 
 - Create the Express app
 - Apply the JSON middleware so the server can read request bodies
