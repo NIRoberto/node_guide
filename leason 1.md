@@ -135,14 +135,18 @@ Here's what a typical `package.json` looks like:
   "name": "my-app",
   "version": "1.0.0",
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "nodemon src/index.js"
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc"
   },
   "dependencies": {
     "express": "^4.18.2"
   },
   "devDependencies": {
-    "nodemon": "^3.1.11"
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
   }
 }
 ```
@@ -160,12 +164,12 @@ This is a common source of confusion for beginners.
 npm install express
 
 # Install as a dev dependency (the -D flag)
-npm install -D nodemon
+npm install -D typescript tsx @types/node @types/express
 ```
 
 Examples:
 - `express` → dependency (your server needs it to run)
-- `nodemon` → devDependency (just a tool to auto-restart during development)
+- `typescript`, `tsx`, `@types/*` → devDependencies (only needed during development)
 
 ### What is node_modules?
 
@@ -184,16 +188,18 @@ The `scripts` section in `package.json` lets you define shortcuts for commands y
 
 ```json
 "scripts": {
-  "start": "node src/index.js",
-  "dev": "nodemon src/index.js"
+  "dev": "tsx watch src/index.ts",
+  "build": "tsc",
+  "start": "node dist/index.js"
 }
 ```
 
 You run them like this:
 
 ```bash
-npm start        # runs "node src/index.js"
-npm run dev      # runs "nodemon src/index.js"
+npm run dev      # runs TypeScript directly with hot reload
+npm run build    # compiles TypeScript to JavaScript
+npm start        # runs the compiled output
 ```
 
 Note: `start` and `test` are special — you can run them without the `run` keyword. All other custom scripts need `npm run`.
@@ -283,44 +289,41 @@ Node.js has three types of modules:
 
 **1. Built-in modules** — come with Node.js, no installation needed
 
-```javascript
-const fs = require('fs');       // file system
-const path = require('path');   // file paths
-const http = require('http');   // HTTP server
+```typescript
+import fs from 'fs';       // file system
+import path from 'path';   // file paths
+import http from 'http';   // HTTP server
 ```
 
 **2. Third-party modules** — installed via npm
 
-```javascript
-const express = require('express');
+```typescript
+import express from 'express';
 ```
 
 **3. Your own modules** — files you create yourself
 
-```javascript
-// utils.js
-function add(a, b) {
+```typescript
+// utils.ts
+export function add(a: number, b: number): number {
   return a + b;
 }
-module.exports = { add };
 
-// index.js
-const { add } = require('./utils');
+// index.ts
+import { add } from './utils';
 ```
 
-### require vs import
+### import vs require
 
-You'll see two ways to import modules in Node.js:
+With TypeScript, you always use `import`/`export` (ES Module syntax). This is cleaner and gives you full type support.
 
-```javascript
-// CommonJS (older, default in Node.js)
-const express = require('express');
-
-// ES Modules (newer, used in modern JS)
+```typescript
+// TypeScript — always use this
 import express from 'express';
+import { Router, Request, Response } from 'express';
 ```
 
-For beginners, stick with `require`. It's the default in Node.js and you'll see it in most tutorials and documentation.
+The old `require()` syntax is CommonJS (plain JavaScript). TypeScript compiles your `import` statements down to `require()` behind the scenes when targeting Node.js, so you don't need to worry about it.
 
 ---
 
@@ -331,15 +334,17 @@ Let's build a simple HTTP server using only Node.js built-in modules — no Expr
 ```bash
 mkdir my-app && cd my-app
 npm init -y
+npm install -D typescript tsx @types/node
+npx tsc --init
 mkdir src
-touch src/index.js
+touch src/index.ts
 ```
 
-**src/index.js:**
-```javascript
-const http = require('http');
+**src/index.ts:**
+```typescript
+import http, { IncomingMessage, ServerResponse } from 'http';
 
-const server = http.createServer((req, res) => {
+const server = http.createServer((req: IncomingMessage, res: ServerResponse) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
   res.end('Hello from Node.js!');
 });
@@ -351,7 +356,7 @@ server.listen(3000, () => {
 
 Run it:
 ```bash
-node src/index.js
+npx tsx src/index.ts
 ```
 
 Open your browser and go to `http://localhost:3000`. You'll see "Hello from Node.js!".
@@ -543,37 +548,41 @@ Think of it like building a house:
 
 ```bash
 npm install express
+npm install -D typescript tsx @types/node @types/express
 ```
 
 ### Basic Express Server
 
-```javascript
-const express = require('express');
+```typescript
+import express, { Request, Response } from 'express';
+
 const app = express();
+const PORT = 3000;
 
 // Middleware to parse JSON request bodies
 app.use(express.json());
 
 // Define a route
-app.get('/', (req, res) => {
+app.get('/', (req: Request, res: Response) => {
   res.send('Hello from Express!');
 });
 
 // Start the server
-app.listen(3000, () => {
-  console.log('Server running on http://localhost:3000');
+app.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
 });
 ```
 
 Let's break this down line by line:
 
-- `require('express')` — imports the Express package
+- `import express from 'express'` — imports the Express package
+- `Request, Response` — TypeScript types for `req` and `res`, imported from Express
 - `express()` — creates an Express application
 - `app.use(express.json())` — tells Express to automatically parse incoming JSON data
 - `app.get('/', ...)` — defines what happens when someone visits the `/` route with a GET request
-- `req` — the incoming request (contains URL, headers, body, etc.)
-- `res` — the response you send back to the client
-- `app.listen(3000, ...)` — starts the server on port 3000
+- `req: Request` — the incoming request (typed so your editor knows all available properties)
+- `res: Response` — the response you send back to the client
+- `app.listen(PORT, ...)` — starts the server on port 3000
 
 ### What is a Port?
 
@@ -585,19 +594,20 @@ A port is like a door number on a building. Your computer has one IP address, bu
 
 When you visit `http://localhost:3000`, you're saying: "connect to my own machine (`localhost`) through door number `3000`".
 
-### nodemon — Auto-restart on Save
+### tsx — Run TypeScript with Hot Reload
 
-Every time you change your code, you'd have to stop and restart the server manually. `nodemon` watches your files and restarts the server automatically when you save.
+Instead of `nodemon`, we use `tsx` which runs TypeScript files directly and watches for changes — no manual compilation needed.
 
 ```bash
-npm install -D nodemon
+npm install -D tsx
 ```
 
 Add to `package.json`:
 ```json
 "scripts": {
-  "dev": "nodemon src/index.js",
-  "start": "node src/index.js"
+  "dev": "tsx watch src/index.ts",
+  "build": "tsc",
+  "start": "node dist/index.js"
 }
 ```
 
@@ -622,21 +632,26 @@ HTTP methods you'll use most:
 
 ### Defining Routes
 
-```javascript
+```typescript
+import express, { Request, Response } from 'express';
+
+const app = express();
+app.use(express.json());
+
 // GET /users — return a list of users
-app.get('/users', (req, res) => {
+app.get('/users', (req: Request, res: Response) => {
   res.json({ users: [] });
 });
 
 // POST /users — create a new user
-app.post('/users', (req, res) => {
-  const body = req.body; // the data sent in the request
+app.post('/users', (req: Request, res: Response) => {
+  const body = req.body;
   res.status(201).json({ created: body });
 });
 
 // GET /users/:id — get a specific user by ID
-app.get('/users/:id', (req, res) => {
-  const id = req.params.id; // grab the :id from the URL
+app.get('/users/:id', (req: Request, res: Response) => {
+  const { id } = req.params;
   res.json({ id });
 });
 ```
@@ -683,40 +698,45 @@ Request → Middleware 1 → Middleware 2 → Route Handler → Response
 
 ### How Middleware Works
 
-```javascript
-app.use((req, res, next) => {
-  console.log(`${req.method} ${req.url}`); // log every request
+```typescript
+import { Request, Response, NextFunction } from 'express';
+
+app.use((req: Request, res: Response, next: NextFunction) => {
+  console.log(`${req.method} ${req.url}`);
   next(); // IMPORTANT: call next() to move to the next step
 });
 ```
 
 If you forget to call `next()`, the request gets stuck and the client never gets a response.
 
+`NextFunction` is the TypeScript type for the `next` parameter — always import it from `express`.
+
 ### Built-in Express Middleware
 
-```javascript
-app.use(express.json());       // parses JSON request bodies
-app.use(express.urlencoded()); // parses form data
-app.use(express.static('public')); // serves static files (HTML, CSS, images)
+```typescript
+app.use(express.json());            // parses JSON request bodies
+app.use(express.urlencoded());      // parses form data
+app.use(express.static('public'));  // serves static files (HTML, CSS, images)
 ```
 
 ### Middleware Order Matters
 
 Middleware runs in the order you define it. Always put your middleware **before** your routes.
 
-```javascript
-const express = require('express');
+```typescript
+import express, { Request, Response, NextFunction } from 'express';
+
 const app = express();
 
 // Middleware first
 app.use(express.json());
-app.use((req, res, next) => {
+app.use((req: Request, res: Response, next: NextFunction) => {
   console.log(`${req.method} ${req.url}`);
   next();
 });
 
 // Routes after
-app.get('/', (req, res) => {
+app.get('/', (req: Request, res: Response) => {
   res.send('Hello!');
 });
 ```
@@ -730,41 +750,44 @@ As your app grows, putting everything in one file becomes messy. Here's a clean 
 my-app/
 ├── src/
 │   ├── routes/
-│   │   └── users.js      # user-related routes
-│   └── index.js          # entry point
+│   │   └── users.ts      # user-related routes
+│   └── index.ts          # entry point
 ├── package.json
+├── tsconfig.json
 └── .gitignore
 ```
 
-**src/routes/users.js** — group related routes using `express.Router()`:
+**src/routes/users.ts** — group related routes using `express.Router()`:
 
-```javascript
-const express = require('express');
-const router = express.Router();
+```typescript
+import { Router, Request, Response } from 'express';
 
-router.get('/', (req, res) => {
+const router = Router();
+
+router.get('/', (req: Request, res: Response) => {
   res.json({ users: [] });
 });
 
-router.post('/', (req, res) => {
+router.post('/', (req: Request, res: Response) => {
   res.status(201).json({ created: req.body });
 });
 
-module.exports = router;
+export default router;
 ```
 
-**src/index.js** — import and mount the router:
+**src/index.ts** — import and mount the router:
 
-```javascript
-const express = require('express');
-const usersRouter = require('./routes/users');
+```typescript
+import express from 'express';
+import usersRouter from './routes/users';
 
 const app = express();
+const PORT = 3000;
+
 app.use(express.json());
+app.use('/users', usersRouter);
 
-app.use('/users', usersRouter); // all routes in usersRouter are prefixed with /users
-
-app.listen(3000, () => console.log('Server on http://localhost:3000'));
+app.listen(PORT, () => console.log(`Server on http://localhost:${PORT}`));
 ```
 
 Now `GET /users` and `POST /users` are handled by `usersRouter`, keeping your `index.js` clean.
@@ -793,11 +816,12 @@ For learning or small APIs with just a few routes:
 my-app/
 ├── src/
 │   ├── routes/
-│   │   ├── users.js
-│   │   └── products.js
-│   └── index.js
+│   │   ├── users.ts
+│   │   └── products.ts
+│   └── index.ts
 ├── .gitignore
 ├── package.json
+├── tsconfig.json
 └── README.md
 ```
 
@@ -815,23 +839,24 @@ MVC stands for Model-View-Controller. It separates your code into three layers:
 my-app/
 ├── src/
 │   ├── controllers/
-│   │   ├── userController.js      # business logic for users
-│   │   └── productController.js
+│   │   ├── userController.ts      # business logic for users
+│   │   └── productController.ts
 │   ├── models/
-│   │   ├── User.js                # user data structure
-│   │   └── Product.js
+│   │   ├── User.ts                # user data structure
+│   │   └── Product.ts
 │   ├── routes/
-│   │   ├── userRoutes.js          # just route definitions
-│   │   └── productRoutes.js
+│   │   ├── userRoutes.ts          # just route definitions
+│   │   └── productRoutes.ts
 │   ├── middlewares/
-│   │   ├── auth.js                # authentication middleware
-│   │   └── errorHandler.js        # error handling middleware
+│   │   ├── auth.ts                # authentication middleware
+│   │   └── errorHandler.ts        # error handling middleware
 │   ├── config/
-│   │   └── database.js            # database connection
-│   └── index.js
+│   │   └── database.ts            # database connection
+│   └── index.ts
 ├── .env
 ├── .gitignore
 ├── package.json
+├── tsconfig.json
 └── README.md
 ```
 
@@ -867,37 +892,38 @@ my-app/
 ├── src/
 │   ├── features/
 │   │   ├── users/
-│   │   │   ├── user.model.js
-│   │   │   ├── user.controller.js
-│   │   │   ├── user.routes.js
-│   │   │   └── user.service.js     # reusable business logic
+│   │   │   ├── user.model.ts
+│   │   │   ├── user.controller.ts
+│   │   │   ├── user.routes.ts
+│   │   │   └── user.service.ts     # reusable business logic
 │   │   ├── products/
-│   │   │   ├── product.model.js
-│   │   │   ├── product.controller.js
-│   │   │   ├── product.routes.js
-│   │   │   └── product.service.js
+│   │   │   ├── product.model.ts
+│   │   │   ├── product.controller.ts
+│   │   │   ├── product.routes.ts
+│   │   │   └── product.service.ts
 │   │   └── orders/
-│   │       ├── order.model.js
-│   │       ├── order.controller.js
-│   │       ├── order.routes.js
-│   │       └── order.service.js
+│   │       ├── order.model.ts
+│   │       ├── order.controller.ts
+│   │       ├── order.routes.ts
+│   │       └── order.service.ts
 │   ├── shared/
 │   │   ├── middlewares/
-│   │   │   ├── auth.js
-│   │   │   └── errorHandler.js
+│   │   │   ├── auth.ts
+│   │   │   └── errorHandler.ts
 │   │   ├── utils/
-│   │   │   ├── logger.js
-│   │   │   └── validator.js
+│   │   │   ├── logger.ts
+│   │   │   └── validator.ts
 │   │   └── config/
-│   │       ├── database.js
-│   │       └── env.js
-│   └── index.js
+│   │       ├── database.ts
+│   │       └── env.ts
+│   └── index.ts
 ├── tests/
-│   ├── users.test.js
-│   └── products.test.js
+│   ├── users.test.ts
+│   └── products.test.ts
 ├── .env
 ├── .gitignore
 ├── package.json
+├── tsconfig.json
 └── README.md
 ```
 
