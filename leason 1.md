@@ -208,6 +208,67 @@ npm run <script>             # Run a script from package.json
 npm start                    # Run the start script
 ```
 
+### Commonly Used Packages
+
+Here are the most popular packages you'll encounter in real Node.js projects:
+
+#### Web Frameworks
+| Package | Install | What it does |
+|---------|---------|-------------|
+| `express` | `npm install express` | Minimal web framework for building servers and APIs |
+| `fastify` | `npm install fastify` | Faster alternative to Express |
+
+#### Environment Variables
+| Package | Install | What it does |
+|---------|---------|-------------|
+| `dotenv` | `npm install dotenv` | Loads variables from a `.env` file into `process.env` |
+
+#### Database
+| Package | Install | What it does |
+|---------|---------|-------------|
+| `mongoose` | `npm install mongoose` | Connect and work with MongoDB |
+| `pg` | `npm install pg` | Connect to PostgreSQL |
+| `mysql2` | `npm install mysql2` | Connect to MySQL |
+| `prisma` | `npm install -D prisma` | Modern ORM for SQL databases |
+
+#### Authentication & Security
+| Package | Install | What it does |
+|---------|---------|-------------|
+| `bcrypt` | `npm install bcrypt` | Hash passwords securely |
+| `jsonwebtoken` | `npm install jsonwebtoken` | Create and verify JWT tokens |
+| `cors` | `npm install cors` | Allow/restrict cross-origin requests |
+| `helmet` | `npm install helmet` | Sets secure HTTP headers |
+
+#### Validation
+| Package | Install | What it does |
+|---------|---------|-------------|
+| `zod` | `npm install zod` | Schema validation for request data |
+| `joi` | `npm install joi` | Alternative schema validation library |
+
+#### Development Tools
+| Package | Install | What it does |
+|---------|---------|-------------|
+| `nodemon` | `npm install -D nodemon` | Auto-restarts server on file changes |
+| `tsx` | `npm install -D tsx` | Run TypeScript files directly (fast) |
+| `ts-node` | `npm install -D ts-node` | Run TypeScript files directly |
+| `typescript` | `npm install -D typescript` | TypeScript compiler |
+| `@types/node` | `npm install -D @types/node` | TypeScript types for Node.js built-ins |
+| `@types/express` | `npm install -D @types/express` | TypeScript types for Express |
+
+#### HTTP Requests (calling other APIs)
+| Package | Install | What it does |
+|---------|---------|-------------|
+| `axios` | `npm install axios` | Make HTTP requests to external APIs |
+| `node-fetch` | `npm install node-fetch` | Fetch API for Node.js |
+
+#### Utilities
+| Package | Install | What it does |
+|---------|---------|-------------|
+| `lodash` | `npm install lodash` | Utility functions for arrays, objects, strings |
+| `uuid` | `npm install uuid` | Generate unique IDs |
+| `dayjs` | `npm install dayjs` | Parse and format dates (lightweight) |
+| `morgan` | `npm install morgan` | HTTP request logger middleware for Express |
+
 ---
 
 ## Node.js Modules
