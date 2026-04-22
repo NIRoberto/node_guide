@@ -28,36 +28,46 @@ A REST API for property listings with the following endpoints:
 2. Install `express` as a production dependency
 3. Install `nodemon` as a dev dependency
 4. Add `dev` and `start` scripts to `package.json`
-5. Create a `src/` folder with the following structure:
+5. Create a `src/` folder following the **MVC folder structure** — the most common and industry-standard pattern for Node.js/Express apps:
 
 ```
 airbnb-api/
 ├── src/
+│   ├── controllers/
+│   │   └── listings.controller.js   # business logic (what happens when a route is hit)
+│   ├── models/
+│   │   └── listing.model.js         # data structure and in-memory data
 │   ├── routes/
-│   │   └── listings.js
-│   ├── data.js
-│   └── index.js
+│   │   └── listings.routes.js       # route definitions only — maps URLs to controllers
+│   └── index.js                     # app entry point
 ├── package.json
 └── .gitignore
 ```
+
+> **Why this structure?** Separating routes, controllers, and models keeps each file focused on one responsibility. Routes don't contain logic. Controllers don't hold data. This is how real production apps are organized and what employers expect to see.
 
 ---
 
 ## Requirements
 
-### data.js
+### models/listing.model.js
 
 - Create an array of at least 3 listing objects
 - Each listing should have: `id`, `title`, `location`, `pricePerNight`, `guests`
 - Export the array so other files can use it
 
-### routes/listings.js
+### controllers/listings.controller.js
 
-- Create an Express Router
-- Implement all 5 endpoints listed above
+- Export one function per route: `getAllListings`, `getListingById`, `createListing`, `updateListing`, `deleteListing`
+- Each function contains the actual logic (finding, creating, updating, deleting)
 - For GET by ID, PUT, and DELETE — return a `404` if the listing doesn't exist
 - For POST — return a `400` if any required field is missing
 - For POST — respond with `201` status and the newly created listing
+
+### routes/listings.routes.js
+
+- Create an Express Router
+- Map each route to its corresponding controller function — no logic here
 - Export the router
 
 ### index.js

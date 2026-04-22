@@ -967,6 +967,201 @@ my-app/
 
 ---
 
+## MVC in Practice: Users API
+
+Let's build a real users API using the MVC structure. This is the same pattern you'll use in the assignment and in real jobs.
+
+The folder structure we're building:
+
+```
+src/
+├── models/
+│   └── user.model.ts
+├── controllers/
+│   └── users.controller.ts
+├── routes/
+│   └── users.routes.ts
+└── index.ts
+```
+
+### Step 1 — Model: Define the data
+
+The model holds your data structure and the in-memory array. Think of it as the "database" for now.
+
+**src/models/user.model.ts**
+```typescript
+export interface User {
+  id: number;
+  name: string;
+  email: string;
+}
+
+// In-memory data — acts as our database for now
+export const users: User[] = [
+  { id: 1, name: "Alice", email: "alice@gmail.com" },
+  { id: 2, name: "Bob", email: "bob@gmail.com" },
+];
+```
+
+### Step 2 — Controller: Write the logic
+
+The controller contains all the business logic — finding users, creating them, deleting them. Each function handles one endpoint.
+
+**src/controllers/users.controller.ts**
+```typescript
+import type { Request, Response } from "express";
+import { users, type User } from "../models/user.model.js";
+
+// GET /users
+export function getAllUsers(req: Request, res: Response) {
+  res.json(users);
+}
+
+// GET /users/:id
+export function getUserById(req: Request, res: Response) {
+  const id = parseInt(req.params["id"] as string);
+  const user = users.find((u) => u.id === id);
+
+  if (!user) {
+    return res.status(404).json({ error: "User not found" });
+  }
+
+  res.json(user);
+}
+
+// POST /users
+export function createUser(req: Request, res: Response) {
+  const { name, email } = req.body as User;
+
+  if (!name || !email) {
+    return res.status(400).json({ error: "name and email are required" });
+  }
+
+  const newUser: User = { id: users.length + 1, name, email };
+  users.push(newUser);
+
+  res.status(201).json(newUser);
+}
+
+// PUT /users/:id
+export function updateUser(req: Request, res: Response) {
+  const id = parseInt(req.params["id"] as string);
+  const index = users.findIndex((u) => u.id === id);
+
+  if (index === -1) {
+    return res.status(404).json({ error: "User not found" });
+  }
+
+  users[index] = { ...users[index], ...(req.body as Partial<User>) } as User;
+  res.json(users[index]);
+}
+
+// DELETE /users/:id
+export function deleteUser(req: Request, res: Response) {
+  const id = parseInt(req.params["id"] as string);
+  const index = users.findIndex((u) => u.id === id);
+
+  if (index === -1) {
+    return res.status(404).json({ error: "User not found" });
+  }
+
+  users.splice(index, 1);
+  res.json({ message: "User deleted successfully" });
+}
+```
+
+Notice: **no route definitions here, just logic**. Each function does one thing.
+
+### Step 3 — Routes: Map URLs to controllers
+
+The routes file is intentionally thin — it just connects URLs to controller functions. No logic lives here.
+
+**src/routes/users.routes.ts**
+```typescript
+import { Router } from "express";
+import {
+  getAllUsers,
+  getUserById,
+  createUser,
+  updateUser,
+  deleteUser,
+} from "../controllers/users.controller.js";
+
+const router = Router();
+
+router.get("/", getAllUsers);
+router.get("/:id", getUserById);
+router.post("/", createUser);
+router.put("/:id", updateUser);
+router.delete("/:id", deleteUser);
+
+export default router;
+```
+
+See how clean this is? Anyone reading this file immediately knows what endpoints exist and which function handles each one.
+
+### Step 4 — Entry point: Wire everything together
+
+**src/index.ts**
+```typescript
+import express from "express";
+import usersRouter from "./routes/users.routes.js";
+
+const app = express();
+const PORT = 3000;
+
+app.use(express.json());
+app.use("/users", usersRouter);
+
+app.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
+});
+```
+
+`index.ts` only does two things: configure the app and start the server. Nothing else.
+
+### How a request flows through the layers
+
+```
+POST /users
+  ↓
+index.ts          → app.use('/users', usersRouter)
+  ↓
+users.routes.ts   → router.post('/', createUser)
+  ↓
+users.controller.ts → createUser() reads req.body, pushes to array
+  ↓
+user.model.ts     → users array is updated
+  ↓
+Response: 201 + new user JSON
+```
+
+### Compare: Before vs After
+
+**Before (everything in one file):**
+```typescript
+// index.ts — 100+ lines, hard to navigate
+app.post('/users', (req, res) => {
+  // logic mixed with routing
+});
+```
+
+**After (MVC):**
+```typescript
+// routes — just mapping
+router.post('/', createUser);
+
+// controller — just logic
+export function createUser(req, res) { ... }
+
+// model — just data
+export const users: User[] = [...];
+```
+
+Each file has one job. When something breaks, you know exactly where to look.
+
+---
+
 ## Summary
 
 | Concept | What it is |
