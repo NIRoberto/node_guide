@@ -19,11 +19,11 @@ app.use("/users", usersRouter);
 
 // ─── Start Server ─────────────────────────────────────────────────────────────
 
-async function main() {
-  await connectDB();
+// async function main() {
+//   await connectDB();
   app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
-}
+// }
 
-main();
+// main();
