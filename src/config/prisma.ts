@@ -1,12 +1,10 @@
-import { PrismaClient } from "../../generated/prisma/client.js";
+import "dotenv/config";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { PrismaClient } from "../../generated/prisma/client.js";
 
-const adapter = new PrismaPg({ connectionString: process.env["DATABASE_URL"] });
+const connectionString = `${process.env.DATABASE_URL}`;
+
+const adapter = new PrismaPg({ connectionString });
 const prisma = new PrismaClient({ adapter });
 
-export async function connectDB() {
-  await prisma.$connect();
-  console.log("Database connected successfully");
-}
-
-export default prisma;
+export { prisma };

@@ -1,11 +1,14 @@
 import "dotenv/config";
 import express from "express";
 import type { Request, Response } from "express";
-import { connectDB } from "./config/prisma.js";
 import usersRouter from "./routes/users.routes.js";
+import { prisma } from "./config/prisma.js";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT;
 
 app.use(express.json());
 
@@ -19,11 +22,18 @@ app.use("/users", usersRouter);
 
 // ─── Start Server ─────────────────────────────────────────────────────────────
 
-// async function main() {
-//   await connectDB();
-  app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
-// }
+async function connectDb() {
+  try {
+    await prisma.$connect();
+    console.log("Database connected successfully");
+    app.listen(PORT, () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  } catch (error) {
+    console.log("====================================");
+    console.log(error);
+    console.log("====================================");
+  }
+}
 
-// main();
+connectDb();
