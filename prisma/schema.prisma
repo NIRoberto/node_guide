@@ -12,13 +12,49 @@ datasource db {
   provider = "postgresql"
 }
 
+enum ListingType {
+  APARTMENT
+  HOUSE
+  VILLA
+  CABIN
+}
+
+enum Role {
+  ADMIN
+  HOST
+  GUEST
+}
+
+model User {
+  id                Int       @id @default(autoincrement())
+  email             String    @unique
+  name              String?
+  username          String?   @unique
+  password          String
+  role              Role      @default(GUEST)
+  resetToken        String?
+  resetTokenExpiry  DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  listings          Listing[]
+}
 
 
 
-model User { 
-  id    Int     @id @default(autoincrement()) 
-  email String  @unique
-  name  String?
-  username String? @unique
-  password String 
-} 
+
+
+model Listing {
+  id           Int         @id @default(autoincrement())
+  title        String
+  description  String
+  location     String
+  pricePerNight Float
+  guests       Int
+  type         ListingType
+  amenities    String[]
+  rating       Float?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  host         User        @relation(fields: [hostId], references: [id])
+  hostId       Int
+}

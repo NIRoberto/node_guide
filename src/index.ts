@@ -2,8 +2,12 @@ import "dotenv/config";
 import express from "express";
 import type { Request, Response } from "express";
 import usersRouter from "./routes/users.routes.js";
+import listingsRouter from "./routes/listings.routes.js";
 import { prisma } from "./config/prisma.js";
+import { notFound, globalErrorHandler } from "./middlewares/errorHandler.js";
+import { authenticate, requireAdmin } from "./middlewares/auth.middleware.js";
 import dotenv from "dotenv";
+import authRouter from "./routes/auth.routers.js";
 
 dotenv.config();
 
@@ -18,7 +22,14 @@ app.get("/", (req: Request, res: Response) => {
   res.send("Welcome to Airbnb application");
 });
 
-app.use("/users", usersRouter);
+app.use("/auth", authRouter);
+app.use("/users", authenticate, usersRouter);  // all user routes require auth
+app.use("/listings", listingsRouter);           // public GET, protected POST/PUT/DELETE
+
+// ─── Error Handling ───────────────────────────────────────────────────────────
+
+app.use(notFound);
+app.use(globalErrorHandler);
 
 // ─── Start Server ─────────────────────────────────────────────────────────────
 
