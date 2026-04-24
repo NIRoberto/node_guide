@@ -26,13 +26,26 @@ Add a full authentication and authorization system to the Airbnb API. Users must
 
 ## Part 1 — Update the Prisma Schema
 
+Add a `Role` enum and update the User model:
+
+```prisma
+enum Role {
+  ADMIN
+  HOST
+  GUEST
+}
+```
+
 Add these fields to the User model:
+- `role` — `Role`, default `GUEST` — determines what the user can do
 - `password` — String (stores the bcrypt hash — never the plain password)
 - `updatedAt` — DateTime, `@updatedAt`
 - `resetToken` — String? (hashed reset token — stored as a hash, not raw)
 - `resetTokenExpiry` — DateTime? (1 hour from creation — tokens must expire)
 
 Run a migration named `add_auth_fields`.
+
+> The `ADMIN` role is never assigned through the API — set it manually in the database or Prisma Studio. Never let users assign themselves as ADMIN.
 
 ---
 
@@ -53,12 +66,12 @@ JWT_EXPIRES_IN=7d
 Create `src/controllers/auth.controller.ts`:
 
 **register:**
-- Accept `name`, `email`, `username`, `phone`, `password`, `role`
+- Accept `name`, `email`, `username`, `password`, `role` (`HOST` or `GUEST` only — never `ADMIN`)
 - Validate all fields are present — return 400 if missing
 - Validate password is at least 8 characters — return 400 if too short
-- Check email is not already taken — return 409 if it is
+- Check email or username is not already taken — use `findFirst` with `OR` — return 409 if taken
 - Hash password: `bcrypt.hash(password, 10)`
-- Create user with hashed password
+- Create user with hashed password, default role to `GUEST` if not provided: `role: role ?? "GUEST"`
 - Return user without `password` field: `const { password: _, ...userWithoutPassword } = user`
 
 **login:**
@@ -77,6 +90,14 @@ Go to [jwt.io](https://jwt.io) and paste a token you generated. The payload is b
 
 Create `src/middlewares/auth.middleware.ts`:
 
+First extend the Request type so TypeScript knows about `userId` and `role`:
+```typescript
+export interface AuthRequest extends Request {
+  userId?: number;
+  role?: string;
+}
+```
+
 **authenticate:**
 - Read `req.headers["authorization"]`
 - Check it exists and starts with `"Bearer "` — return 401 if not
@@ -87,19 +108,18 @@ Create `src/middlewares/auth.middleware.ts`:
 
 **requireHost:**
 - Runs after `authenticate`
-- Check `req.role === "HOST"` — return 403 if not, call `next()` if yes
+- Allow if `req.role === "HOST"` OR `req.role === "ADMIN"` — ADMIN can do everything a HOST can
+- Return 403 if neither, call `next()` if yes
 
 **requireGuest:**
 - Runs after `authenticate`
-- Check `req.role === "GUEST"` — return 403 if not, call `next()` if yes
+- Allow if `req.role === "GUEST"` OR `req.role === "ADMIN"`
+- Return 403 if neither
 
-Extend the Request type:
-```typescript
-export interface AuthRequest extends Request {
-  userId?: number;
-  role?: string;
-}
-```
+**requireAdmin:**
+- Runs after `authenticate`
+- Check `req.role === "ADMIN"` — return 403 if not
+- Use this to protect admin-only routes like managing all users
 
 > 401 = not authenticated (missing/invalid token). 403 = authenticated but not permitted (wrong role). These are different — do not mix them up
 
@@ -123,10 +143,11 @@ Update `listings.controller.ts`:
 
 **updateListing:**
 - After fetching the listing, check `listing.hostId === req.userId`
-- Return 403 with `"You can only edit your own listings"` if not the owner
+- ADMIN bypasses this check — `if (listing.hostId !== req.userId && req.role !== "ADMIN")`
+- Return 403 with `"You can only edit your own listings"` if not the owner and not ADMIN
 
 **deleteListing:**
-- Same ownership check — return 403 if not the owner
+- Same ownership + ADMIN bypass check — return 403 if not the owner and not ADMIN
 
 ---
 
@@ -243,18 +264,23 @@ airbnb-api/
 
 ## Checklist
 
+- [ ] `Role` enum added to schema with `ADMIN`, `HOST`, `GUEST`
+- [ ] User model has `role` field defaulting to `GUEST`
 - [ ] Password hashed with bcrypt before saving
+- [ ] Register accepts `role` of `HOST` or `GUEST` only — defaults to `GUEST`
 - [ ] Login returns JWT with `userId` and `role`
 - [ ] Protected routes return 401 without valid token
 - [ ] Expired tokens return 401
-- [ ] Only hosts can create listings
-- [ ] Only guests can make bookings
-- [ ] Hosts can only edit/delete their own listings — 403 for others
-- [ ] Guests can only cancel their own bookings — 403 for others
+- [ ] Only HOST (and ADMIN) can create listings
+- [ ] Only GUEST (and ADMIN) can make bookings
+- [ ] Hosts can only edit/delete their own listings — ADMIN can edit/delete any
+- [ ] Guests can only cancel their own bookings — ADMIN can cancel any
+- [ ] `requireAdmin` middleware exists and blocks non-ADMIN users
 - [ ] Date validation rejects past check-in and invalid ranges
 - [ ] Booking conflict check returns 409 on overlap
 - [ ] Cancelled bookings update status, not deleted
 - [ ] GET /auth/me returns user without password
+- [ ] GET /auth/me includes listings for HOST, bookings for GUEST
 - [ ] Change password requires current password — 401 if wrong
 - [ ] Forgot password returns same response regardless of email existence
 - [ ] Reset token hashed before storing

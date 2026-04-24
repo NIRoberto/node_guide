@@ -143,21 +143,112 @@ The number `10` is the **cost factor** — it controls how slow the hash is. Hig
 
 ## User Roles
 
-In an Airbnb-like app, not all users are equal:
+In a real app, not all users should be able to do the same things. A random visitor should not be able to delete someone else's listing. A guest should not be able to create listings. An admin should be able to manage everything.
 
-- **HOST** — can create, update, and delete listings
-- **GUEST** — can browse listings and make bookings
+This is solved with **roles** — a label assigned to each user that defines what they are allowed to do.
 
-This is **role-based access control (RBAC)**. Instead of checking individual permissions, you assign a role to each user and check the role on protected routes.
+### The three roles in this app
+
+**GUEST** (default)
+- Can browse all listings
+- Can make bookings
+- Cannot create or manage listings
+- Can only cancel their own bookings
+
+**HOST**
+- Can do everything a GUEST can
+- Can create listings
+- Can update and delete their own listings only — not other hosts' listings
+- Cannot make bookings (they are the ones being booked)
+
+**ADMIN**
+- Full access to everything
+- Can update or delete any listing regardless of ownership
+- Can manage all users
+- Bypasses all ownership checks
+
+### Why store the role in the JWT?
+
+When a user logs in, their role is embedded in the JWT token:
+
+```typescript
+jwt.sign({ userId: user.id, role: user.role }, JWT_SECRET, { expiresIn: "7d" });
+```
+
+This means on every protected request, the middleware can read the role directly from the token — **no database query needed**. This makes role checks fast and cheap.
 
 ```
-POST /listings   → HOST only
-PUT  /listings/:id → HOST only (and must be the owner)
-POST /bookings   → GUEST only
-DELETE /bookings/:id → GUEST only (and must be the owner)
+Request comes in with token
+  ↓
+authenticate middleware decodes token
+  ↓
+req.userId = 1, req.role = "HOST"  ← available instantly, no DB hit
+  ↓
+requireHost checks req.role → allowed
 ```
 
-The role is stored in the database and embedded in the JWT payload so middleware can check it without a database query on every request.
+If the role was not in the token, you'd have to query the database on every single request just to check the role — slow and wasteful.
+
+### Role vs Ownership — two different checks
+
+This is a common confusion. Role and ownership are **two separate things** and both matter:
+
+- **Role check** — are you the right type of user? (HOST, GUEST, ADMIN)
+- **Ownership check** — does this resource belong to you?
+
+Being a HOST is not enough to edit a listing. You must also be the **owner** of that specific listing:
+
+```
+Alice (HOST) tries to edit Bob's (HOST) listing
+  ↓
+authenticate → req.role = "HOST" ✓
+  ↓
+ownership check → listing.hostId (2) !== req.userId (1) ✗
+  ↓
+403 Forbidden — "You can only edit your own listings"
+```
+
+ADMIN bypasses the ownership check — they can edit or delete any listing:
+
+```typescript
+if (listing.hostId !== req.userId && req.role !== "ADMIN") {
+  return res.status(403).json({ error: "You can only edit your own listings" });
+}
+```
+
+### Role-based access summary
+
+| Route | GUEST | HOST | ADMIN |
+|-------|-------|------|-------|
+| `GET /listings` | ✅ | ✅ | ✅ |
+| `POST /listings` | ❌ | ✅ | ✅ |
+| `PUT /listings/:id` | ❌ | ✅ own only | ✅ any |
+| `DELETE /listings/:id` | ❌ | ✅ own only | ✅ any |
+| `POST /bookings` | ✅ | ❌ | ✅ |
+| `DELETE /bookings/:id` | ✅ own only | ❌ | ✅ any |
+| `GET /users` | ❌ | ❌ | ✅ |
+
+### How roles are assigned
+
+The role is set at registration. The client sends `role` in the request body:
+
+```json
+{
+  "name": "Alice",
+  "email": "alice@example.com",
+  "username": "alice",
+  "password": "password123",
+  "role": "HOST"
+}
+```
+
+If no role is provided, it defaults to `GUEST`:
+
+```typescript
+role: role ?? "GUEST"
+```
+
+> In a production app you would never let users assign themselves the ADMIN role. ADMIN would be set manually in the database or through a separate internal tool.
 
 ---
 
