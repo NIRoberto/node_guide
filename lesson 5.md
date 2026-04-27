@@ -1,4 +1,4 @@
-# Lesson 5: Swagger Documentation & Deployment
+# Lesson 5: API Documentation with Swagger
 
 ## Table of Contents
 1. [What is API Documentation?](#what-is-api-documentation)
@@ -8,13 +8,8 @@
 5. [Documenting Routes](#documenting-routes)
 6. [Documenting Schemas](#documenting-schemas)
 7. [Documenting Authentication](#documenting-authentication)
-8. [What is Deployment?](#what-is-deployment)
-9. [Preparing for Production](#preparing-for-production)
-10. [Environment Variables in Production](#environment-variables-in-production)
-11. [Deploying to Railway](#deploying-to-railway)
-12. [Deploying to Render](#deploying-to-render)
-13. [Deploying the Database](#deploying-the-database)
-14. [How It All Fits Together](#how-it-all-fits-together)
+8. [Advanced Documentation](#advanced-documentation)
+9. [Testing with Swagger UI](#testing-with-swagger-ui)
 
 ---
 
@@ -128,12 +123,8 @@ const options: swaggerJsdoc.Options = {
     },
     servers: [
       {
-        // In development, the server runs locally
-        // In production, this would be your deployed URL
-        url: process.env["NODE_ENV"] === "production"
-          ? process.env["API_URL"] as string
-          : "http://localhost:3000",
-        description: process.env["NODE_ENV"] === "production" ? "Production" : "Development",
+        url: "http://localhost:3000",
+        description: "Development server",
       },
     ],
     components: {
@@ -177,7 +168,7 @@ export function setupSwagger(app: Express) {
 ```typescript
 import { setupSwagger } from "./config/swagger.js";
 
-// Call before app.listen — after middleware, before routes
+// Call after middleware, before routes
 setupSwagger(app);
 ```
 
@@ -508,347 +499,161 @@ Any route that has `security: - bearerAuth: []` in its docs will show a lock ico
 
 ---
 
-## What is Deployment?
+## Advanced Documentation
 
-So far everything has run on your local machine. **Deployment** means putting your app on a server that's accessible on the internet — so real users can use it 24/7.
+### Query Parameters
 
-When you deploy, your app runs on someone else's computer (a cloud server) instead of yours. That server has a public IP address and a domain name, so anyone in the world can reach it.
-
-### Development vs Production
-
-| | Development | Production |
-|--|------------|-----------|
-| Where it runs | Your laptop | Cloud server |
-| Who can access | Only you | Anyone on the internet |
-| Database | Local PostgreSQL | Hosted PostgreSQL (Railway, Supabase, Neon) |
-| Environment variables | `.env` file | Set in the hosting platform's dashboard |
-| Restarts | Manual | Automatic (if the server crashes) |
-| Logs | Your terminal | Platform's log viewer |
-
-### What happens during deployment
-
-```
-1. You push your code to GitHub
-   ↓
-2. Hosting platform detects the push
-   ↓
-3. Platform pulls your code
-   ↓
-4. Platform runs npm install
-   ↓
-5. Platform runs your build command (if any)
-   ↓
-6. Platform starts your app with npm start
-   ↓
-7. Your app is live at https://your-app.railway.app
-```
-
----
-
-## Preparing for Production
-
-Before deploying, there are a few things to set up.
-
-### 1. Add a build script
-
-TypeScript needs to be compiled to JavaScript before running in production. Add a build script to `package.json`:
-
-```json
-"scripts": {
-  "dev": "nodemon --exec tsx src/index.ts",
-  "build": "tsc",
-  "start": "node dist/index.js"
-}
-```
-
-- `npm run build` — compiles TypeScript to `dist/`
-- `npm start` — runs the compiled JavaScript
-
-### 2. Update tsconfig.json for production output
-
-Make sure your `tsconfig.json` has the output directory set:
-
-```json
-{
-  "compilerOptions": {
-    "outDir": "./dist",
-    "rootDir": "./src",
-    "module": "nodenext",
-    "target": "esnext"
-  }
-}
-```
-
-### 3. Add a .env.example file
-
-Never commit your `.env` file. Instead, create a `.env.example` with all the variable names but no values. This tells other developers (and your hosting platform) what variables are needed:
-
-```env
-DATABASE_URL=
-JWT_SECRET=
-EMAIL_HOST=
-EMAIL_PORT=
-EMAIL_USER=
-EMAIL_PASS=
-EMAIL_FROM=
-CLOUDINARY_CLOUD_NAME=
-CLOUDINARY_API_KEY=
-CLOUDINARY_API_SECRET=
-PORT=
-NODE_ENV=
-API_URL=
-```
-
-### 4. Handle the PORT dynamically
-
-Hosting platforms assign a port dynamically — you can't hardcode `3000`. Always read from `process.env.PORT`:
+For endpoints with query parameters like pagination or filtering:
 
 ```typescript
-const PORT = Number(process.env["PORT"]) || 3000;
+/**
+ * @swagger
+ * /listings:
+ *   get:
+ *     summary: Get all listings
+ *     tags: [Listings]
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: Items per page
+ *       - in: query
+ *         name: location
+ *         schema:
+ *           type: string
+ *         description: Filter by location
+ *     responses:
+ *       200:
+ *         description: List of listings
+ */
 ```
 
-### 5. Run Prisma migrations on deploy
+### File Uploads
 
-After deploying, your database needs the latest migrations applied. Add a `postinstall` or `migrate` script:
+For endpoints that accept file uploads:
 
-```json
-"scripts": {
-  "build": "tsc",
-  "start": "node dist/index.js",
-  "migrate": "prisma migrate deploy"
-}
+```typescript
+/**
+ * @swagger
+ * /users/{id}/avatar:
+ *   post:
+ *     summary: Upload user avatar
+ *     tags: [Users]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required: [image]
+ *             properties:
+ *               image:
+ *                 type: string
+ *                 format: binary
+ *                 description: Profile picture (jpeg, png, webp — max 5MB)
+ *     responses:
+ *       200:
+ *         description: Avatar uploaded successfully
+ *       400:
+ *         description: Invalid file format or size
+ *       401:
+ *         description: Unauthorized
+ */
 ```
 
-`prisma migrate deploy` (not `dev`) runs existing migrations without creating new ones — safe for production.
+### Enums
 
----
+For fields with specific allowed values:
 
-## Environment Variables in Production
-
-Your `.env` file stays on your local machine — it's in `.gitignore` and never pushed to GitHub. In production, you set environment variables through your hosting platform's dashboard.
-
-**Why not commit .env?**
-- It contains passwords, API keys, and secrets
-- Anyone with access to your GitHub repo could steal them
-- Different environments (dev, staging, production) need different values
-
-Every hosting platform has a way to set environment variables:
-- **Railway** → Project → Variables tab
-- **Render** → Service → Environment tab
-- **Heroku** → Settings → Config Vars
-
-These are injected into `process.env` when your app starts — exactly like a `.env` file, but secure.
-
----
-
-## Deploying to Railway
-
-Railway is one of the easiest platforms to deploy Node.js apps. It supports PostgreSQL, automatic deploys from GitHub, and has a generous free tier.
-
-### Step 1 — Push your code to GitHub
-
-```bash
-git init
-git add .
-git commit -m "initial commit"
-git remote add origin https://github.com/yourusername/your-repo.git
-git push -u origin main
+```typescript
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     Listing:
+ *       type: object
+ *       properties:
+ *         type:
+ *           type: string
+ *           enum: [apartment, house, villa, cabin]
+ *           example: apartment
+ *         status:
+ *           type: string
+ *           enum: [pending, confirmed, cancelled]
+ *           example: confirmed
+ */
 ```
 
-### Step 2 — Create a Railway account
+### Nested Objects
 
-Go to [railway.app](https://railway.app) and sign up with GitHub.
+For responses that include related data:
 
-### Step 3 — Create a new project
-
-1. Click **New Project**
-2. Select **Deploy from GitHub repo**
-3. Select your repository
-4. Railway detects it's a Node.js app automatically
-
-### Step 4 — Add a PostgreSQL database
-
-1. In your project, click **New** → **Database** → **PostgreSQL**
-2. Railway creates a PostgreSQL instance and adds `DATABASE_URL` to your environment variables automatically
-
-### Step 5 — Set environment variables
-
-Go to your service → **Variables** tab and add all your variables:
-
-```
-JWT_SECRET=your-production-secret
-EMAIL_HOST=smtp.gmail.com
-EMAIL_PORT=587
-EMAIL_USER=your-email@gmail.com
-EMAIL_PASS=your-app-password
-EMAIL_FROM=Your App <your-email@gmail.com>
-CLOUDINARY_CLOUD_NAME=your-cloud-name
-CLOUDINARY_API_KEY=your-api-key
-CLOUDINARY_API_SECRET=your-api-secret
-NODE_ENV=production
-API_URL=https://your-app.railway.app
-```
-
-`DATABASE_URL` is already set by Railway from the PostgreSQL service.
-
-### Step 6 — Set the start command
-
-Railway needs to know how to start your app. Go to **Settings** → **Deploy** and set:
-
-```
-Build Command: npm run build && npx prisma migrate deploy
-Start Command: npm start
-```
-
-### Step 7 — Deploy
-
-Railway automatically deploys every time you push to your main branch. Your app will be live at `https://your-app.railway.app`.
-
----
-
-## Deploying to Render
-
-Render is another popular platform with a free tier for web services.
-
-### Step 1 — Create a Render account
-
-Go to [render.com](https://render.com) and sign up with GitHub.
-
-### Step 2 — Create a Web Service
-
-1. Click **New** → **Web Service**
-2. Connect your GitHub repository
-3. Configure the service:
-
-```
-Name:          airbnb-api
-Environment:   Node
-Build Command: npm install && npm run build && npx prisma migrate deploy
-Start Command: npm start
-```
-
-### Step 3 — Add a PostgreSQL database
-
-1. Click **New** → **PostgreSQL**
-2. Create the database
-3. Copy the **Internal Database URL**
-4. Add it as `DATABASE_URL` in your web service's environment variables
-
-### Step 4 — Set environment variables
-
-Go to your web service → **Environment** tab and add all variables (same as Railway step 5).
-
-### Step 5 — Deploy
-
-Click **Create Web Service**. Render builds and deploys your app. It's live at `https://your-app.onrender.com`.
-
-**Note:** On Render's free tier, the service spins down after 15 minutes of inactivity and takes ~30 seconds to wake up on the next request. Upgrade to a paid plan to avoid this.
-
----
-
-## Deploying the Database
-
-Your local PostgreSQL database is only on your machine. In production you need a **hosted database** — a PostgreSQL instance running on a cloud server.
-
-### Options
-
-| Service | Free Tier | Notes |
-|---------|----------|-------|
-| Railway PostgreSQL | 1GB storage | Easiest — same platform as your app |
-| Supabase | 500MB storage | Also has auth, storage, realtime |
-| Neon | 512MB storage | Serverless PostgreSQL, great free tier |
-| Render PostgreSQL | 1GB (90 days free) | Same platform as your app |
-
-### Running migrations in production
-
-Never run `prisma migrate dev` in production — it's for development only. Use:
-
-```bash
-npx prisma migrate deploy
-```
-
-This applies all pending migrations without creating new ones or resetting the database. Run it as part of your build/deploy command.
-
-### Connection pooling
-
-In production, your app might receive many simultaneous requests, each opening a database connection. PostgreSQL has a limit on concurrent connections. Use **connection pooling** to reuse connections efficiently.
-
-Prisma recommends using **PgBouncer** (built into Railway and Supabase) or the `?pgbouncer=true` parameter in your connection string:
-
-```env
-DATABASE_URL="postgresql://user:pass@host:5432/db?pgbouncer=true&connection_limit=1"
+```typescript
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     Listing:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: integer
+ *         title:
+ *           type: string
+ *         host:
+ *           $ref: '#/components/schemas/User'
+ *         bookings:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/Booking'
+ */
 ```
 
 ---
 
-## How It All Fits Together
+## Testing with Swagger UI
 
-### Final project structure
+Once your documentation is set up, Swagger UI becomes a powerful testing tool:
 
-```
-my-app/
-├── src/
-│   ├── config/
-│   │   ├── cloudinary.ts
-│   │   ├── email.ts
-│   │   ├── multer.ts
-│   │   ├── prisma.ts
-│   │   └── swagger.ts       ← new
-│   ├── controllers/
-│   │   ├── auth.controller.ts
-│   │   ├── upload.controller.ts
-│   │   └── users.controller.ts
-│   ├── middlewares/
-│   │   └── auth.middleware.ts
-│   ├── routes/
-│   │   ├── auth.routes.ts
-│   │   ├── upload.routes.ts
-│   │   └── users.routes.ts
-│   ├── templates/
-│   │   └── emails.ts
-│   └── index.ts
-├── prisma/
-│   └── schema.prisma
-├── .env                  ← local only, never commit
-├── .env.example          ← commit this — shows what vars are needed
-├── .gitignore
-├── package.json
-├── tsconfig.json
-└── README.md
-```
+### 1. View all endpoints
 
-### Full deployment flow
+Open `http://localhost:3000/api-docs` — all your endpoints are organized by tags (Users, Auth, Listings, etc.)
 
-```
-Local Development
-  ↓
-git push origin main
-  ↓
-Railway / Render detects push
-  ↓
-npm install
-  ↓
-npm run build  (tsc → compiles to dist/)
-  ↓
-npx prisma migrate deploy  (applies migrations to production DB)
-  ↓
-npm start  (node dist/index.js)
-  ↓
-App live at https://your-app.railway.app
+### 2. Test without authentication
 
-Swagger UI: https://your-app.railway.app/api-docs
-```
+Click on any endpoint without a lock icon → **Try it out** → fill in parameters → **Execute**
 
-### Checklist before deploying
+The response appears below with status code, headers, and body.
 
-- [ ] `PORT` reads from `process.env["PORT"]` with a fallback
-- [ ] All secrets are in `.env` and `.env` is in `.gitignore`
-- [ ] `.env.example` exists with all variable names
-- [ ] `npm run build` compiles without errors
-- [ ] `npm start` runs the compiled output
-- [ ] `prisma migrate deploy` is in the build/start command
-- [ ] All environment variables are set in the hosting platform
-- [ ] Swagger UI works at `/api-docs`
+### 3. Test with authentication
+
+1. Call `POST /auth/login` with valid credentials
+2. Copy the token from the response
+3. Click **Authorize** (top right)
+4. Paste the token
+5. Now all protected endpoints work
+
+### 4. Import into Postman
+
+Go to `http://localhost:3000/api-docs.json` → copy the URL → Postman → Import → paste URL
+
+All your endpoints are now in Postman with full documentation.
 
 ---
 
@@ -864,16 +669,10 @@ Swagger UI: https://your-app.railway.app/api-docs
 | `@swagger` | JSDoc tag used to annotate routes with OpenAPI documentation |
 | `$ref` | Reference to a reusable schema defined in `components/schemas` |
 | `security: bearerAuth` | Marks a route as requiring JWT authentication in Swagger UI |
-| Deployment | Running your app on a cloud server accessible on the internet |
-| Railway | Cloud hosting platform — easy Node.js + PostgreSQL deployment |
-| Render | Alternative cloud hosting platform with a free tier |
-| `npm run build` | Compiles TypeScript to JavaScript for production |
-| `npm start` | Runs the compiled JavaScript in production |
-| `prisma migrate deploy` | Applies pending migrations in production — safe, no resets |
-| Environment Variables | Secrets set in the hosting platform dashboard — never in code |
-| `.env.example` | Template showing what variables are needed — safe to commit |
-| Connection Pooling | Reuses database connections to handle many simultaneous requests |
-| PgBouncer | PostgreSQL connection pooler — built into Railway and Supabase |
+| `tags` | Groups related endpoints together in the UI |
+| `parameters` | Defines path params, query params, or headers |
+| `requestBody` | Defines what data the endpoint expects |
+| `responses` | Defines all possible responses with status codes |
 
 ---
 
@@ -881,8 +680,4 @@ Swagger UI: https://your-app.railway.app/api-docs
 - [Swagger / OpenAPI Docs](https://swagger.io/docs/)
 - [swagger-jsdoc Docs](https://github.com/Surnet/swagger-jsdoc)
 - [OpenAPI 3.0 Specification](https://spec.openapis.org/oas/v3.0.0)
-- [Railway Docs](https://docs.railway.app)
-- [Render Docs](https://render.com/docs)
-- [Prisma Deploy Guide](https://www.prisma.io/docs/guides/deployment)
-- [Neon PostgreSQL](https://neon.tech)
-- [Supabase](https://supabase.com)
+- [Swagger UI Demo](https://petstore.swagger.io/)

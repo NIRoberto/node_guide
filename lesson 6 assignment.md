@@ -2,7 +2,7 @@
 
 ## Overview
 
-Extend the Airbnb API with new features — Search & Filtering, Bookings, Reviews, and Stats — while applying every performance technique from lesson 6. This assignment is about building real endpoints the right way from the start: paginated, indexed, cached, rate limited, and optimized.
+gitExtend the Airbnb API with new features — Search & Filtering, Bookings, Reviews, and Stats — while applying every performance technique from lesson 6. This assignment is about building real endpoints the right way from the start: paginated, indexed, cached, rate limited, and optimized.
 
 ---
 
