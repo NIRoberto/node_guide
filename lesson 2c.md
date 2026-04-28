@@ -5,11 +5,17 @@
 2. [Creating a Seed File](#creating-a-seed-file)
 3. [Running the Seed](#running-the-seed)
 4. [Seeding with Relationships](#seeding-with-relationships)
-5. [Package.json Scripts](#packagejson-scripts)
-6. [Full Database Workflow](#full-database-workflow)
-7. [Prisma Studio](#prisma-studio)
-8. [Reset & Fresh Start](#reset--fresh-start)
-9. [Common Issues & Fixes](#common-issues--fixes)
+5. [Upsert — Create or Update](#upsert--create-or-update)
+6. [createMany — Bulk Insert](#createmany--bulk-insert)
+7. [Transactions](#transactions)
+8. [Raw Queries](#raw-queries)
+9. [Database Indexes](#database-indexes)
+10. [Prisma Config File](#prisma-config-file)
+11. [Package.json Scripts](#packagejson-scripts)
+12. [Full Database Workflow](#full-database-workflow)
+13. [Prisma Studio](#prisma-studio)
+14. [Reset & Fresh Start](#reset--fresh-start)
+15. [Common Issues & Fixes](#common-issues--fixes)
 
 ---
 
@@ -251,7 +257,265 @@ await prisma.user.deleteMany();      // fails — listings still reference users
 
 ---
 
-## Package.json Scripts
+## Upsert — Create or Update
+
+`upsert` creates a record if it does not exist, or updates it if it does. It is the safest way to seed required data — running the seed twice will not create duplicates.
+
+```typescript
+// Create the admin user if they don't exist, update their name if they do
+const admin = await prisma.user.upsert({
+  where: { email: "admin@example.com" },   // find by this unique field
+  update: { name: "Admin Updated" },        // if found — apply these changes
+  create: {                                  // if not found — create with this data
+    name: "Admin",
+    email: "admin@example.com",
+    username: "admin",
+    password: hashedPassword,
+    role: "HOST",
+  },
+});
+```
+
+Use `upsert` in seeds instead of `create` whenever the data might already exist — it makes your seed **idempotent** (safe to run multiple times without side effects).
+
+---
+
+## createMany — Bulk Insert
+
+`createMany` inserts multiple records in a single database query — much faster than calling `create` in a loop.
+
+```typescript
+// Insert 3 listings in one query instead of 3 separate queries
+await prisma.listing.createMany({
+  data: [
+    { title: "Apartment", location: "New York", pricePerNight: 120, guests: 2, type: "APARTMENT", amenities: [], hostId: alice.id },
+    { title: "Beach House", location: "Miami", pricePerNight: 250, guests: 6, type: "HOUSE", amenities: [], hostId: alice.id },
+    { title: "Cabin", location: "Denver", pricePerNight: 180, guests: 4, type: "CABIN", amenities: [], hostId: alice.id },
+  ],
+  skipDuplicates: true, // skip records that violate unique constraints instead of throwing
+});
+```
+
+**Limitations of `createMany`:**
+- Does not support nested creates — you cannot create related records in the same call
+- Does not return the created records in PostgreSQL (returns only the count)
+- Use individual `create` calls when you need the returned `id` to create related records
+
+```typescript
+// ❌ createMany — can't use returned ids for bookings
+await prisma.listing.createMany({ data: [...] });
+// listing ids are not returned
+
+// ✅ create — returns the id, use it for bookings
+const listing = await prisma.listing.create({ data: { ... } });
+await prisma.booking.create({ data: { listingId: listing.id, ... } });
+```
+
+---
+
+## Transactions
+
+A **transaction** is a group of database operations that either all succeed or all fail together. If any operation in the transaction fails, all previous operations in that transaction are rolled back — the database stays in a consistent state.
+
+**When you need a transaction:**
+- Creating a booking AND updating the listing's availability — both must succeed or neither should
+- Transferring money — debit one account AND credit another — both must happen
+- Any time two or more writes must be atomic
+
+### Sequential transactions
+
+```typescript
+// Both operations run in a single transaction
+// If the booking creation fails, the listing update is rolled back
+const [booking, listing] = await prisma.$transaction([
+  prisma.booking.create({
+    data: { listingId: 1, guestId: 2, checkIn: new Date(), checkOut: new Date(), totalPrice: 240 },
+  }),
+  prisma.listing.update({
+    where: { id: 1 },
+    data: { rating: 4.5 },
+  }),
+]);
+```
+
+### Interactive transactions
+
+Use this when you need to read data and make decisions inside the transaction:
+
+```typescript
+const booking = await prisma.$transaction(async (tx) => {
+  // Check for conflicts inside the transaction
+  const conflict = await tx.booking.findFirst({
+    where: {
+      listingId: 1,
+      status: "CONFIRMED",
+      checkIn: { lt: checkOut },
+      checkOut: { gt: checkIn },
+    },
+  });
+
+  if (conflict) {
+    throw new Error("Listing already booked for these dates");
+    // throwing inside $transaction automatically rolls back everything
+  }
+
+  // Safe to create — no conflict found
+  return tx.booking.create({
+    data: { listingId: 1, guestId: 2, checkIn, checkOut, totalPrice: 240 },
+  });
+});
+```
+
+Inside `$transaction`, use `tx` instead of `prisma` — `tx` is the transactional client that ensures all operations are part of the same transaction.
+
+---
+
+## Raw Queries
+
+Sometimes Prisma's query API is not enough — complex aggregations, full-text search, or database-specific features. You can run raw SQL directly.
+
+### $queryRaw — returns results
+
+```typescript
+// Run raw SQL and get results back
+const results = await prisma.$queryRaw`
+  SELECT location, COUNT(*) as total, AVG("pricePerNight") as avg_price
+  FROM listings
+  GROUP BY location
+  ORDER BY total DESC
+`;
+```
+
+Use template literals (backticks) — Prisma automatically parameterizes values to prevent SQL injection:
+
+```typescript
+const minPrice = 100;
+const listings = await prisma.$queryRaw`
+  SELECT * FROM listings WHERE "pricePerNight" > ${minPrice}
+`;
+// ${minPrice} is safely parameterized — not string concatenation
+```
+
+### $executeRaw — runs without returning results
+
+```typescript
+// Update all listings in a city — no return value needed
+await prisma.$executeRaw`
+  UPDATE listings SET rating = 0 WHERE location = ${'New York, NY'}
+`;
+```
+
+### When to use raw queries
+
+- Complex aggregations (`GROUP BY`, `HAVING`, window functions)
+- Full-text search
+- Database-specific features not supported by Prisma
+- Performance-critical queries where Prisma's generated SQL is suboptimal
+
+Always prefer Prisma's query API when possible — raw queries bypass type safety.
+
+---
+
+## Database Indexes
+
+An **index** is a data structure that speeds up queries on specific columns. Without an index, PostgreSQL scans every row to find matches. With an index, it jumps directly to the matching rows.
+
+**When to add an index:**
+- Columns you frequently filter by (`WHERE location = ...`)
+- Columns you frequently sort by (`ORDER BY pricePerNight`)
+- Foreign key columns (`hostId`, `guestId`, `listingId`)
+
+### Adding indexes in Prisma schema
+
+```prisma
+model Listing {
+  id            Int      @id @default(autoincrement())
+  location      String
+  pricePerNight Float
+  type          ListingType
+  hostId        Int
+
+  // Single field index — speeds up filtering by location
+  @@index([location])
+
+  // Single field index — speeds up sorting/filtering by price
+  @@index([pricePerNight])
+
+  // Composite index — speeds up queries that filter by both type AND location
+  @@index([type, location])
+
+  // Foreign key index — speeds up joins and lookups by hostId
+  @@index([hostId])
+}
+
+model Booking {
+  id        Int      @id @default(autoincrement())
+  guestId   Int
+  listingId Int
+  checkIn   DateTime
+  checkOut  DateTime
+
+  // Index on foreign keys
+  @@index([guestId])
+  @@index([listingId])
+
+  // Composite index for date range queries
+  @@index([listingId, checkIn, checkOut])
+}
+```
+
+After adding indexes, run a migration:
+
+```bash
+npm run db:migrate -- --name add_indexes
+```
+
+### When NOT to add indexes
+
+- Do not index every column — indexes slow down writes (INSERT, UPDATE, DELETE) because the index must be updated too
+- Do not index columns with very few unique values (e.g. a boolean `isActive` — only 2 values, an index barely helps)
+- Only index columns that appear in `WHERE`, `ORDER BY`, or `JOIN` conditions in your actual queries
+
+---
+
+## Prisma Config File
+
+Prisma 7+ uses a `prisma.config.ts` file at the root of your project to configure the schema path and database connection. This replaces the old `datasource` URL in `schema.prisma`.
+
+**prisma.config.ts:**
+```typescript
+import "dotenv/config"; // must be first — loads DATABASE_URL before Prisma reads it
+import { defineConfig } from "prisma/config";
+
+export default defineConfig({
+  schema: "prisma/schema.prisma",
+  datasource: {
+    url: process.env["DATABASE_URL"],
+  },
+});
+```
+
+**prisma/schema.prisma** — with the config file, you do not need the `url` in the datasource block:
+
+```prisma
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  // url is read from prisma.config.ts
+}
+```
+
+**Why use a config file instead of putting the URL in schema.prisma:**
+- The config file is TypeScript — you can use `process.env` directly
+- Keeps secrets out of the schema file
+- Supports multiple environments (dev, staging, production) with different URLs
+
+---
+
 
 A well-configured `package.json` makes working with your database fast and consistent. Here is a complete setup for an Airbnb-style project:
 
@@ -496,6 +760,16 @@ npm run db:fresh
 |---------|------------|
 | Seed file | Script that fills the database with initial data |
 | `prisma db seed` | Runs the seed file |
+| `upsert` | Create if not exists, update if exists — safe to run multiple times |
+| `createMany` | Bulk insert multiple records in one query — faster than a loop |
+| `skipDuplicates` | `createMany` option that skips records violating unique constraints |
+| `$transaction([])` | Sequential transaction — all operations succeed or all roll back |
+| `$transaction(async tx)` | Interactive transaction — read and write with rollback on throw |
+| `$queryRaw` | Run raw SQL and return results — use template literals for safety |
+| `$executeRaw` | Run raw SQL with no return value |
+| `@@index` | Adds a database index to speed up queries on that column |
+| Composite index | Index on multiple columns — speeds up queries filtering by all of them |
+| `prisma.config.ts` | Config file for Prisma 7+ — sets schema path and database URL |
 | `prisma migrate reset` | Wipes database, re-runs migrations, runs seed |
 | `prisma migrate dev` | Creates a new migration and applies it |
 | `prisma migrate deploy` | Applies existing migrations — safe for production |
@@ -505,7 +779,6 @@ npm run db:fresh
 | `prisma migrate status` | Shows which migrations have been applied |
 | `db:fresh` script | Reset + seed in one command — most useful dev command |
 | `deleteMany` order | Always delete children before parents — foreign key constraints |
-| `"prisma": { "seed": "..." }` | Tells Prisma which file to run for seeding |
 
 ---
 
