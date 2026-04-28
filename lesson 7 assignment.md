@@ -1,408 +1,493 @@
-# Lesson 7 Assignment: Airbnb API — Versioning
+# Lesson 7 Assignment: Deploy Airbnb API to Production
 
 ## Overview
 
-Add API versioning to the Airbnb API. You will restructure the existing routes into `v1`, introduce `v2` with breaking changes, add deprecation headers to `v1`, and document both versions with Swagger.
+Deploy your Airbnb API to a live production server with a hosted PostgreSQL database. Migrate all your local database schema and data to production. By the end, your API is publicly accessible on the internet with full functionality.
 
 ---
 
-## What You're Building
+## Part 1 — Prepare for Production
 
-| Version | Endpoints | Status |
-|---------|----------|--------|
-| v1 | `/v1/users`, `/v1/listings`, `/v1/bookings`, `/v1/auth` | Deprecated |
-| v2 | `/v2/users`, `/v2/listings`, `/v2/bookings`, `/v2/auth` | Current |
+### 1. Update package.json scripts
 
----
-
-## Part 1 — Restructure Routes into v1
-
-Move all existing routes into a versioned structure. No logic changes yet — just reorganize.
-
-### New folder structure
-
-```
-src/
-├── controllers/
-│   ├── v1/
-│   │   ├── users.controller.ts
-│   │   ├── listings.controller.ts
-│   │   ├── bookings.controller.ts
-│   │   └── auth.controller.ts
-│   └── v2/                        ← new (Part 2)
-├── routes/
-│   ├── v1/
-│   │   ├── index.ts               ← groups all v1 routes
-│   │   ├── users.routes.ts
-│   │   ├── listings.routes.ts
-│   │   ├── bookings.routes.ts
-│   │   └── auth.routes.ts
-│   └── v2/                        ← new (Part 2)
-├── services/                      ← new — shared logic
-│   ├── listings.service.ts
-│   ├── users.service.ts
-│   └── bookings.service.ts
-└── index.ts
-```
-
-### Tasks
-
-1. Move all existing controllers into `src/controllers/v1/`
-2. Move all existing routes into `src/routes/v1/`
-3. Create `src/routes/v1/index.ts` that groups all v1 routes:
-
-```typescript
-import { Router } from "express";
-import usersRouter from "./users.routes.js";
-import listingsRouter from "./listings.routes.js";
-import bookingsRouter from "./bookings.routes.js";
-import authRouter from "./auth.routes.js";
-
-const v1Router = Router();
-
-v1Router.use("/users", usersRouter);
-v1Router.use("/listings", listingsRouter);
-v1Router.use("/bookings", bookingsRouter);
-v1Router.use("/auth", authRouter);
-
-export default v1Router;
-```
-
-4. Update `index.ts` to mount v1 under `/v1`:
-
-```typescript
-import v1Router from "./routes/v1/index.js";
-
-app.use("/v1", v1Router);
-```
-
-5. Verify all existing endpoints still work under `/v1/...`
-
----
-
-## Part 2 — Extract a Services Layer
-
-Before creating v2, extract shared database queries into a services layer. Both v1 and v2 controllers will use these — no duplicated Prisma queries.
-
-Create `src/services/listings.service.ts`:
-- `getAllListings(filters)` — `prisma.listing.findMany()` with location, type, price filters and pagination
-- `getListingById(id)` — `prisma.listing.findUnique()` with host and bookings included
-- `createListing(data)` — `prisma.listing.create()`
-- `updateListing(id, data)` — `prisma.listing.update()`
-- `deleteListing(id)` — `prisma.listing.delete()`
-
-Create `src/services/users.service.ts`:
-- `getAllUsers()` — `prisma.user.findMany()`
-- `getUserById(id)` — `prisma.user.findUnique()` with listings or bookings based on role
-- `updateUser(id, data)` — `prisma.user.update()`
-- `deleteUser(id)` — `prisma.user.delete()`
-
-Create `src/services/bookings.service.ts`:
-- `createBooking(data)` — includes conflict check and `totalPrice` calculation
-- `getBookingById(id)` — with guest and listing details
-- `cancelBooking(id)` — updates status to `CANCELLED`
-
-Update all v1 controllers to call the service functions instead of calling Prisma directly.
-
-> The services layer is what makes versioning practical — v1 and v2 share the same database queries, only the response format differs
-
----
-
-## Part 3 — Create v2 with Breaking Changes
-
-v2 introduces the following breaking changes from v1:
-
-### Breaking change 1 — Listings: `host` field
-
-- **v1** — `host` is a string (the host's name only)
-- **v2** — `host` is a full object `{ id, name, avatar, email }`
-
-### Breaking change 2 — Bookings: `guestId` removed from request body
-
-- **v1** — `POST /v1/bookings` requires `guestId` in the request body
-- **v2** — `POST /v2/bookings` derives `guestId` from the JWT token (`req.userId`) — never from the body
-
-### Breaking change 3 — Users: password field handling
-
-- **v1** — password field is manually stripped in each controller
-- **v2** — a `select` statement explicitly excludes `password` from all user queries at the service level
-
-### Tasks
-
-1. Create `src/routes/v2/index.ts` — same structure as v1 index
-2. Create `src/controllers/v2/listings.controller.ts`:
-   - Call the same `getListingById` service
-   - Return `host` as a full object — do not flatten it to a string
-3. Create `src/controllers/v2/bookings.controller.ts`:
-   - `createBooking` — use `req.userId` as `guestId`, remove it from request body validation
-4. Create `src/controllers/v2/users.controller.ts`:
-   - All user queries use `select` to exclude `password` at the query level
-5. Copy auth routes to v2 — no changes needed for auth
-6. Mount v2 in `index.ts`:
-
-```typescript
-import v2Router from "./routes/v2/index.js";
-
-app.use("/v1", v1Router);
-app.use("/v2", v2Router);
-```
-
-7. Verify:
-   - `GET /v1/listings/1` returns `host: "Alice Johnson"` (string)
-   - `GET /v2/listings/1` returns `host: { id: 1, name: "Alice Johnson", avatar: "...", email: "..." }` (object)
-   - `POST /v1/bookings` requires `guestId` in body
-   - `POST /v2/bookings` does not accept `guestId` in body — uses token
-
----
-
-## Part 4 — Add Deprecation Headers to v1
-
-Create `src/middlewares/deprecation.middleware.ts`:
-
-```typescript
-import type { Request, Response, NextFunction } from "express";
-
-export function deprecateV1(req: Request, res: Response, next: NextFunction) {
-  res.setHeader("Deprecation", "true");
-  res.setHeader("Sunset", "Sat, 01 Jan 2026 00:00:00 GMT");
-  res.setHeader("Link", '</v2>; rel="successor-version"');
-  next();
+```json
+"scripts": {
+  "dev": "nodemon --exec tsx src/index.ts",
+  "build": "tsc",
+  "start": "node dist/index.js",
+  "migrate": "prisma migrate deploy"
 }
 ```
 
-Apply it to all v1 routes in `index.ts`:
+### 2. Make PORT dynamic
 
+Update `index.ts`:
 ```typescript
-import { deprecateV1 } from "./middlewares/deprecation.middleware.js";
-
-app.use("/v1", deprecateV1, v1Router);
-app.use("/v2", v2Router);
+const PORT = Number(process.env["PORT"]) || 3000;
 ```
 
-Verify by calling any v1 endpoint in Postman — the response headers should include `Deprecation: true` and `Sunset: ...`
+### 3. Add health check endpoint
+
+Add to `index.ts` before other routes:
+```typescript
+app.get("/health", (req: Request, res: Response) => {
+  res.json({ 
+    status: "ok", 
+    uptime: process.uptime(), 
+    timestamp: new Date() 
+  });
+});
+```
+
+### 4. Add global error handler
+
+Add as the **last middleware** in `index.ts`:
+```typescript
+app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
+  console.error(err.stack);
+  res.status(500).json({ error: "Something went wrong" });
+});
+```
+
+### 5. Add 404 handler
+
+Add just **before** the global error handler:
+```typescript
+app.use((req: Request, res: Response) => {
+  res.status(404).json({ error: "Route not found" });
+});
+```
+
+### 6. Add request logging
+
+Install:
+```bash
+npm install morgan
+npm install -D @types/morgan
+```
+
+Add as the **first middleware** in `index.ts`:
+```typescript
+import morgan from "morgan";
+
+app.use(process.env["NODE_ENV"] === "production" ? morgan("combined") : morgan("dev"));
+```
+
+### 7. Create .env.example
+
+Create a file with all variable names but no values:
+```env
+DATABASE_URL=
+JWT_SECRET=
+JWT_EXPIRES_IN=
+PORT=
+NODE_ENV=
+API_URL=
+```
+
+### 8. Test the build locally
+
+```bash
+npm run build    # should compile without errors
+npm start        # should start the server from dist/
+```
+
+Visit `http://localhost:3000/health` — should return `{ status: "ok", ... }`
+
+If it works locally, it will work in production.
 
 ---
 
-## Part 5 — Default Version Redirect
+## Part 2 — Verify Migrations
 
-When a client calls `/listings` without a version prefix, redirect them to the latest version:
+### 1. Check all migrations are committed
 
-```typescript
-// In index.ts — before versioned routes
-app.use("/listings", (req, res) => {
-  res.redirect(301, `/v2/listings${req.url}`);
-});
-
-app.use("/users", (req, res) => {
-  res.redirect(301, `/v2/users${req.url}`);
-});
-
-app.use("/bookings", (req, res) => {
-  res.redirect(301, `/v2/bookings${req.url}`);
-});
-
-app.use("/auth", (req, res) => {
-  res.redirect(301, `/v2/auth${req.url}`);
-});
+```bash
+git status
 ```
 
-> 301 Moved Permanently tells clients and search engines the resource has permanently moved to the new URL
+All files in `prisma/migrations/` should be committed. If not:
+```bash
+git add prisma/migrations/
+git commit -m "add migrations"
+```
+
+### 2. Verify migration files
+
+```bash
+ls prisma/migrations/
+```
+
+You should see folders like:
+```
+20240101_init/
+20240115_add_listings/
+20240120_add_bookings/
+```
+
+Each folder contains a `migration.sql` file.
+
+### 3. Test migrations on a fresh database
+
+Create a test database locally:
+```bash
+psql postgres
+CREATE DATABASE test_deploy;
+\q
+```
+
+Update `.env` temporarily:
+```env
+DATABASE_URL="postgresql://postgres:yourpassword@localhost:5432/test_deploy"
+```
+
+Run migrations:
+```bash
+npx prisma migrate deploy
+```
+
+Should apply all migrations successfully. If any fail, fix them before deploying.
+
+Restore your original `DATABASE_URL` after testing.
 
 ---
 
-## Part 6 — Document Both Versions with Swagger
+## Part 3 — Deploy to Railway
 
-Update `src/config/swagger.ts` to document both versions:
+### 1. Push to GitHub
 
-```typescript
-const options: swaggerJsdoc.Options = {
-  definition: {
-    openapi: "3.0.0",
-    info: {
-      title: "Airbnb API",
-      version: "2.0.0",
-      description: "Airbnb REST API — v2 is current, v1 is deprecated",
-    },
-    servers: [
-      {
-        url: "http://localhost:3000/v2",
-        description: "v2 — Current",
-      },
-      {
-        url: "http://localhost:3000/v1",
-        description: "v1 — Deprecated (sunset: Jan 2026)",
-      },
-    ],
-    // ...
-  },
-  apis: ["./src/routes/v1/*.ts", "./src/routes/v2/*.ts"],
-};
+```bash
+git add .
+git commit -m "prepare for deployment"
+git push origin main
 ```
 
-Add a deprecation note to all v1 route docs:
-
-```typescript
-/**
- * @swagger
- * /listings:
- *   get:
- *     summary: Get all listings
- *     tags: [Listings]
- *     deprecated: true
- *     description: >
- *       **Deprecated** — This endpoint will be removed on Jan 1, 2026.
- *       Please migrate to v2. In v2, the `host` field returns a full object
- *       instead of a string.
- */
+Verify `.env` is NOT in the repository:
+```bash
+git status   # .env must not appear
 ```
 
-The `deprecated: true` flag shows a strikethrough on the endpoint in Swagger UI — a clear visual warning.
+### 2. Create Railway project
 
-Add a migration note to all v2 route docs explaining what changed from v1.
+1. Go to [railway.app](https://railway.app)
+2. Sign up with GitHub
+3. Click **New Project** → **Deploy from GitHub repo**
+4. Select your repository
+
+### 3. Add PostgreSQL database
+
+1. In your project, click **New** → **Database** → **PostgreSQL**
+2. Railway creates a PostgreSQL instance
+3. `DATABASE_URL` is automatically added to your app's environment variables
+
+### 4. Set environment variables
+
+Go to your service → **Variables** tab:
+
+```
+JWT_SECRET=<generate with: node -e "console.log(require('crypto').randomBytes(64).toString('hex'))">
+JWT_EXPIRES_IN=7d
+NODE_ENV=production
+API_URL=https://your-app.railway.app
+```
+
+Leave `PORT` and `DATABASE_URL` empty — Railway sets these automatically.
+
+### 5. Configure build and start commands
+
+Go to **Settings** → **Deploy**:
+
+```
+Build Command: npm run build && npx prisma generate && npx prisma migrate deploy
+Start Command: npm start
+```
+
+### 6. Deploy
+
+Railway automatically deploys. Watch the build logs — you should see:
+
+```
+> npm run build
+> npx prisma generate
+> npx prisma migrate deploy
+Applying migration `20240101_init`
+Applying migration `20240115_add_listings`
+...
+> npm start
+Database connected successfully
+Server running on http://localhost:PORT
+```
+
+Your app is live at `https://your-app.railway.app`.
 
 ---
 
-## Part 7 — Write a Migration Guide
+## Part 4 — Verify Deployment
 
-Create `MIGRATION.md` at the root of the project:
+Test every critical endpoint in production:
 
-```markdown
-# Migration Guide: v1 → v2
+### 1. Health check
+```
+GET https://your-app.railway.app/health
+```
+Should return `{ status: "ok", ... }`
 
-## Breaking Changes
+### 2. Swagger UI
+```
+https://your-app.railway.app/api-docs
+```
+Should load the interactive documentation
 
-### GET /listings/:id and GET /listings
-
-**v1 response:**
-\`\`\`json
+### 3. Register a user
+```
+POST https://your-app.railway.app/auth/register
 {
-  "id": 1,
+  "name": "Test User",
+  "email": "test@example.com",
+  "username": "testuser",
+  "phone": "1234567890",
+  "password": "password123",
+  "role": "guest"
+}
+```
+Should return `201` with the created user
+
+### 4. Login
+```
+POST https://your-app.railway.app/auth/login
+{
+  "email": "test@example.com",
+  "password": "password123"
+}
+```
+Should return `200` with a token
+
+### 5. Test protected route
+
+Copy the token from step 4, then:
+```
+GET https://your-app.railway.app/users
+Authorization: Bearer <your-token>
+```
+Should return `200` with a list of users
+
+### 6. Create a listing (as host)
+
+First register a host user, login, then:
+```
+POST https://your-app.railway.app/listings
+Authorization: Bearer <host-token>
+{
   "title": "Cozy Apartment",
-  "host": "Alice Johnson"
+  "description": "Beautiful place in downtown",
+  "location": "New York",
+  "pricePerNight": 120,
+  "guests": 2,
+  "type": "apartment",
+  "amenities": ["wifi", "kitchen"]
 }
-\`\`\`
+```
+Should return `201` with the created listing
 
-**v2 response:**
-\`\`\`json
-{
-  "id": 1,
-  "title": "Cozy Apartment",
-  "host": {
-    "id": 5,
-    "name": "Alice Johnson",
-    "avatar": "https://...",
-    "email": "alice@example.com"
-  }
-}
-\`\`\`
+### 7. Test pagination
+```
+GET https://your-app.railway.app/listings?page=1&limit=5
+```
+Should return paginated listings with `meta` object
 
-**What to update:** Change `listing.host` (string) to `listing.host.name` (string from object).
+### 8. Test search
+```
+GET https://your-app.railway.app/listings/search?location=New York&type=apartment
+```
+Should return filtered listings
 
 ---
 
-### POST /bookings
+## Part 5 — Database Verification
 
-**v1 request body:**
-\`\`\`json
-{
-  "listingId": 1,
-  "guestId": 3,
-  "checkIn": "2025-08-01",
-  "checkOut": "2025-08-05"
-}
-\`\`\`
+### 1. Check migrations ran
 
-**v2 request body:**
-\`\`\`json
-{
-  "listingId": 1,
-  "checkIn": "2025-08-01",
-  "checkOut": "2025-08-05"
-}
-\`\`\`
+In Railway, go to your service → **Deployments** → click the latest deployment → **View Logs**
 
-**What to update:** Remove `guestId` from the request body. The API now reads it from your JWT token.
-
----
-
-## Timeline
-
-- **Now** — v2 is available. v1 is deprecated.
-- **Jan 1, 2026** — v1 will be removed. All v1 requests will return 410 Gone.
+Search for:
+```
+Applying migration
 ```
 
----
+You should see all your migrations applied.
 
-## Final Project Structure
+### 2. Connect to production database
 
-```
-airbnb-api/
-├── prisma/
-│   └── schema.prisma
-├── src/
-│   ├── config/
-│   │   ├── prisma.ts
-│   │   └── swagger.ts
-│   ├── controllers/
-│   │   ├── v1/
-│   │   │   ├── auth.controller.ts
-│   │   │   ├── users.controller.ts
-│   │   │   ├── listings.controller.ts
-│   │   │   └── bookings.controller.ts
-│   │   └── v2/
-│   │       ├── auth.controller.ts
-│   │       ├── users.controller.ts
-│   │       ├── listings.controller.ts
-│   │       └── bookings.controller.ts
-│   ├── middlewares/
-│   │   ├── auth.middleware.ts
-│   │   └── deprecation.middleware.ts
-│   ├── routes/
-│   │   ├── v1/
-│   │   │   ├── index.ts
-│   │   │   ├── auth.routes.ts
-│   │   │   ├── users.routes.ts
-│   │   │   ├── listings.routes.ts
-│   │   │   └── bookings.routes.ts
-│   │   └── v2/
-│   │       ├── index.ts
-│   │       ├── auth.routes.ts
-│   │       ├── users.routes.ts
-│   │       ├── listings.routes.ts
-│   │       └── bookings.routes.ts
-│   ├── services/
-│   │   ├── listings.service.ts
-│   │   ├── users.service.ts
-│   │   └── bookings.service.ts
-│   └── index.ts
-├── MIGRATION.md
-├── .env
-├── .env.example
-└── .gitignore
+Railway provides a way to connect to your database directly. Go to your PostgreSQL service → **Connect** → copy the connection command.
+
+Run it locally:
+```bash
+psql <connection-string>
 ```
 
----
+Check tables exist:
+```sql
+\dt
+```
 
-## Checklist
+Should show: `User`, `Listing`, `Booking`, `Review`, `_prisma_migrations`
 
-- [ ] All existing routes moved into `src/routes/v1/` and `src/controllers/v1/`
-- [ ] Services layer created — no Prisma calls directly in controllers
-- [ ] All v1 endpoints work under `/v1/...`
-- [ ] v2 created with all 3 breaking changes implemented
-- [ ] `GET /v1/listings/:id` returns `host` as string
-- [ ] `GET /v2/listings/:id` returns `host` as full object
-- [ ] `POST /v1/bookings` requires `guestId` in body
-- [ ] `POST /v2/bookings` uses `req.userId` — no `guestId` in body
-- [ ] Deprecation headers on all v1 responses (`Deprecation`, `Sunset`, `Link`)
-- [ ] Unversioned routes redirect to v2 with 301
-- [ ] Swagger documents both versions with correct server URLs
-- [ ] v1 routes marked `deprecated: true` in Swagger — strikethrough visible in UI
-- [ ] `MIGRATION.md` explains all breaking changes with before/after examples
+Check data:
+```sql
+SELECT * FROM "User";
+SELECT * FROM "Listing";
+```
+
+Should show the test data you created in Part 4.
 
 ---
 
-## Further Research
+## Part 6 — Continuous Deployment
 
-- **Semantic versioning** — research `semver`. Understand the difference between major (breaking), minor (new features), and patch (bug fixes) versions and how it applies to APIs
-- **API changelog** — look at how Stripe maintains their [API changelog](https://stripe.com/docs/upgrades). Research how to communicate API changes to developers effectively
-- **Content negotiation** — research the `Accept` header and how it is used for header-based versioning. Understand `application/vnd.airbnb.v2+json`
+Now that your app is deployed, every `git push` triggers a new deployment automatically.
+
+### Test the workflow
+
+1. Make a small change locally (e.g., update a response message)
+2. Commit and push:
+   ```bash
+   git add .
+   git commit -m "update response message"
+   git push origin main
+   ```
+3. Go to Railway → watch the build logs
+4. Once deployed, verify the change is live
+
+### Add a new feature with a migration
+
+1. Update `schema.prisma` (e.g., add a `verified` field to User)
+2. Run migration locally:
+   ```bash
+   npx prisma migrate dev --name add_verified_field
+   ```
+3. Commit and push:
+   ```bash
+   git add .
+   git commit -m "add verified field to users"
+   git push origin main
+   ```
+4. Railway automatically runs `prisma migrate deploy` during build
+5. The new field is now in production
+
+---
+
+## Part 7 — Alternative: Deploy to Render
+
+If you prefer Render over Railway, follow these steps instead of Part 3.
+
+### 1. Create Render account
+
+Go to [render.com](https://render.com) and sign up with GitHub.
+
+### 2. Create PostgreSQL database
+
+1. Click **New** → **PostgreSQL**
+2. Name: `airbnb-db`
+3. Select free plan
+4. Click **Create Database**
+5. Copy the **Internal Database URL**
+
+### 3. Create Web Service
+
+1. Click **New** → **Web Service**
+2. Connect your GitHub repository
+3. Configure:
+
+```
+Name:          airbnb-api
+Environment:   Node
+Build Command: npm install && npm run build && npx prisma generate && npx prisma migrate deploy
+Start Command: npm start
+```
+
+### 4. Set environment variables
+
+Go to **Environment** tab:
+
+```
+DATABASE_URL=<paste Internal Database URL from step 2>
+JWT_SECRET=<generate a strong random string>
+JWT_EXPIRES_IN=7d
+NODE_ENV=production
+API_URL=https://your-app.onrender.com
+```
+
+### 5. Deploy
+
+Click **Create Web Service**. Render builds and deploys. Your app is live at `https://your-app.onrender.com`.
+
+Follow Part 4 to verify deployment (replace `railway.app` with `onrender.com`).
+
+---
+
+## Troubleshooting
+
+### Build fails with TypeScript errors
+
+Run `npm run build` locally — fix all errors before pushing.
+
+### Migrations fail in production
+
+Check the logs for the specific error. Common issues:
+- Migration tries to add a non-nullable column to a table with existing data — add a default value
+- Migration conflicts with existing data — fix locally, test on a fresh DB, then redeploy
+
+### App crashes on startup
+
+Check the logs. Common issues:
+- Missing environment variable — verify all variables are set in the platform
+- Database connection fails — verify `DATABASE_URL` is correct
+- Port binding fails — verify you're using `process.env["PORT"]`
+
+### 404 on all routes
+
+Check the logs — the server might not be starting. Verify `npm start` works locally.
+
+### Database connection limit reached
+
+You have too many connections open. Add connection pooling:
+```env
+DATABASE_URL="postgresql://...?connection_limit=5"
+```
+
+Or use Railway's PgBouncer URL instead of the direct URL.
+
+---
+
+## Final Checklist
+
+- [ ] `npm run build` compiles without errors locally
+- [ ] `npm start` runs the compiled output locally
+- [ ] All migrations are committed to Git
+- [ ] `.env` is NOT committed (in `.gitignore`)
+- [ ] `.env.example` exists with all variable names
+- [ ] Health check at `/health` returns 200
+- [ ] Global error handler is the last middleware
+- [ ] 404 handler catches unknown routes
+- [ ] `PORT` reads from `process.env["PORT"]`
+- [ ] `NODE_ENV=production` is set in the platform
+- [ ] All environment variables are set in the platform
+- [ ] App is accessible at the public URL
+- [ ] Swagger UI works in production
+- [ ] Can register, login, and access protected routes
+- [ ] Database migrations ran successfully
+- [ ] Continuous deployment works (push triggers redeploy)
+
+---
+
+## What You Should Practice
+
+- Preparing a Node.js app for production deployment
+- Understanding the difference between development and production environments
+- Managing environment variables securely across environments
+- Using Prisma migrations to sync schema changes from local to production
+- Deploying to cloud platforms (Railway, Render)
+- Verifying deployments with health checks and endpoint testing
+- Setting up continuous deployment from GitHub
+- Troubleshooting deployment issues using platform logs
+- Connecting to production databases for verification
