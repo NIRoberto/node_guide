@@ -1,570 +1,513 @@
-# Lesson 7: Deployment & Database Migration
+# Lesson 7: API Versioning
 
 ## Table of Contents
-1. [What is Deployment?](#what-is-deployment)
-2. [Development vs Production](#development-vs-production)
-3. [Preparing Your App for Production](#preparing-your-app-for-production)
-4. [Environment Variables in Production](#environment-variables-in-production)
-5. [Database Migration Strategy](#database-migration-strategy)
-6. [Migrating from Local to Production Database](#migrating-from-local-to-production-database)
-7. [Hosted Database Options](#hosted-database-options)
-8. [Deploying to Railway](#deploying-to-railway)
-9. [Deploying to Render](#deploying-to-render)
-10. [How It All Fits Together](#how-it-all-fits-together)
+1. [What is API Versioning?](#what-is-api-versioning)
+2. [Why Versioning Matters](#why-versioning-matters)
+3. [Versioning Strategies](#versioning-strategies)
+4. [URL Path Versioning](#url-path-versioning)
+5. [Header Versioning](#header-versioning)
+6. [Query Parameter Versioning](#query-parameter-versioning)
+7. [Implementing URL Versioning in Express](#implementing-url-versioning-in-express)
+8. [Structuring Versioned Code](#structuring-versioned-code)
+9. [Deprecating Old Versions](#deprecating-old-versions)
+10. [Versioning Best Practices](#versioning-best-practices)
 
 ---
 
-## What is Deployment?
+## What is API Versioning?
 
-So far everything has run on your local machine. **Deployment** means putting your app on a server that's accessible on the internet — so real users can use it 24/7.
+Once your API is live and clients are using it — frontend apps, mobile apps, third-party integrations — you cannot just change it freely. If you rename a field, remove an endpoint, or change a response structure, every client that depends on the old behavior breaks.
 
-When you deploy, your app runs on someone else's computer (a cloud server) instead of yours. That server has a public IP address and a domain name, so anyone in the world can reach it.
+**API versioning** is the practice of maintaining multiple versions of your API simultaneously so that:
+- Existing clients keep working on the old version
+- New clients use the latest version
+- You can introduce breaking changes without breaking anyone
 
-```
-Local machine (only you)         Cloud server (everyone)
-─────────────────────────        ──────────────────────────
-localhost:3000                   https://your-app.railway.app
-Local PostgreSQL                 Hosted PostgreSQL
-.env file                        Platform environment variables
-Manual restart                   Auto-restart on crash
-```
+Think of it like a software release. When a company releases v2 of their app, v1 still works for users who haven't updated. The same principle applies to APIs.
 
 ---
 
-## Development vs Production
+## Why Versioning Matters
 
-Understanding the difference between these two environments is critical before deploying.
+### What is a breaking change?
 
-| | Development | Production |
-|--|------------|------------|
-| Where it runs | Your laptop | Cloud server |
-| Who can access | Only you | Anyone on the internet |
-| Database | Local PostgreSQL | Hosted PostgreSQL |
-| Environment variables | `.env` file | Platform dashboard |
-| Restarts | Manual (`npm run dev`) | Automatic on crash |
-| TypeScript | Run directly with `tsx` | Compiled to JS first |
-| Logs | Your terminal | Platform log viewer |
-| Errors | Full stack traces | Generic messages only |
+A **breaking change** is any change that causes existing clients to stop working correctly:
 
-### Why you can't use `tsx` in production
+- Renaming a field: `pricePerNight` → `price`
+- Removing a field from a response
+- Changing a field's type: `id` from `number` to `string`
+- Removing an endpoint
+- Changing required fields on a request body
+- Changing authentication behavior
 
-In development, `tsx` runs TypeScript directly — fast and convenient. In production, you compile TypeScript to JavaScript first with `tsc`, then run the compiled output with `node`. This is faster and more stable.
+### What is a non-breaking change?
 
-```
-Development:  tsx src/index.ts        (runs TS directly)
-Production:   tsc → node dist/index.js (compile first, then run)
-```
+These are safe to deploy without versioning:
 
----
+- Adding a new optional field to a response
+- Adding a new endpoint
+- Adding a new optional request parameter
+- Bug fixes that don't change the contract
 
-## Preparing Your App for Production
+### Real-world example
 
-Before deploying, your app needs a few changes to work correctly in a production environment.
-
-### 1. Add build and start scripts
+Imagine your Airbnb API returns:
 
 ```json
-"scripts": {
-  "dev": "nodemon --exec tsx src/index.ts",
-  "build": "tsc",
-  "start": "node dist/index.js",
-  "migrate": "prisma migrate deploy"
+{
+  "id": 1,
+  "pricePerNight": 120,
+  "host": "Alice Johnson"
 }
 ```
 
-- `npm run build` — compiles TypeScript to `dist/`
-- `npm start` — runs the compiled JavaScript
-- `npm run migrate` — applies pending migrations to production DB
+Your mobile app reads `listing.host` as a string to display the host name.
 
-### 2. Make PORT dynamic
+Now you want to change `host` to return a full object:
 
-Hosting platforms assign a port dynamically — you can't hardcode `3000`. Always read from `process.env`:
-
-```typescript
-const PORT = Number(process.env["PORT"]) || 3000;
+```json
+{
+  "id": 1,
+  "pricePerNight": 120,
+  "host": {
+    "id": 5,
+    "name": "Alice Johnson",
+    "avatar": "https://..."
+  }
+}
 ```
 
-### 3. Add a health check endpoint
+Every mobile app that reads `listing.host` as a string now crashes. Without versioning, you have no way to make this change safely.
 
-Hosting platforms ping a URL to verify your app is running. Add this to `index.ts`:
+With versioning:
+- `GET /v1/listings/:id` — returns `host` as a string (old behavior, existing clients)
+- `GET /v2/listings/:id` — returns `host` as an object (new behavior, new clients)
+
+---
+
+## Versioning Strategies
+
+There are three main approaches. Each has tradeoffs.
+
+### 1. URL Path Versioning
+
+The version is part of the URL:
+
+```
+GET /v1/listings
+GET /v2/listings
+```
+
+**Pros:**
+- Immediately visible — you can see the version in the URL
+- Easy to test in a browser or Postman
+- Easy to route in Express
+- Most widely used — Stripe, GitHub, Twitter all use this
+
+**Cons:**
+- URLs are longer
+- Technically, the URL should identify a resource, not a version
+
+### 2. Header Versioning
+
+The version is sent in a custom request header:
+
+```
+GET /listings
+Accept-Version: 2
+```
+
+or using the `Accept` header:
+
+```
+GET /listings
+Accept: application/vnd.airbnb.v2+json
+```
+
+**Pros:**
+- Clean URLs — the resource URL doesn't change
+- Follows REST principles more strictly
+
+**Cons:**
+- Not visible in the URL — harder to test in a browser
+- Clients must remember to send the header
+- More complex to implement and document
+
+### 3. Query Parameter Versioning
+
+The version is a query parameter:
+
+```
+GET /listings?version=2
+GET /listings?v=2
+```
+
+**Pros:**
+- Easy to test — just add `?v=2` to any URL
+- No URL structure changes
+
+**Cons:**
+- Query params are meant for filtering, not versioning
+- Easy to forget or omit
+- Caching can be tricky
+
+### Which one to use?
+
+**Use URL path versioning** for most projects. It is the most common, the most visible, and the easiest to implement and document. Stripe, GitHub, Twilio, and most major APIs use it.
+
+---
+
+## URL Path Versioning
+
+This is the recommended approach. Every endpoint is prefixed with the version:
+
+```
+/v1/users
+/v1/listings
+/v1/bookings
+
+/v2/users
+/v2/listings
+```
+
+### How it looks in practice
+
+```
+# v1 — original API
+GET  /v1/listings          → returns host as a string
+POST /v1/bookings          → requires guestId in body
+
+# v2 — updated API
+GET  /v2/listings          → returns host as a full object
+POST /v2/bookings          → guestId comes from JWT token, not body
+```
+
+Clients on v1 keep working. New clients use v2. Both run simultaneously.
+
+---
+
+## Header Versioning
+
+The client sends the version in a header. Your middleware reads it and routes accordingly.
 
 ```typescript
-app.get("/health", (req: Request, res: Response) => {
-  res.json({ status: "ok", uptime: process.uptime(), timestamp: new Date() });
+// Client sends:
+// GET /listings
+// Accept-Version: 2
+
+app.use((req, res, next) => {
+  const version = req.headers["accept-version"] ?? "1";
+  req.apiVersion = version;
+  next();
+});
+
+app.get("/listings", (req, res) => {
+  if (req.apiVersion === "2") {
+    // return v2 response
+  } else {
+    // return v1 response
+  }
 });
 ```
 
-### 4. Add a global error handler
+This approach keeps URLs clean but adds complexity to every controller.
 
-Never expose raw error messages to clients in production — they can reveal sensitive info. Add this as the **last middleware** in `index.ts`:
+---
+
+## Query Parameter Versioning
 
 ```typescript
+// Client sends:
+// GET /listings?v=2
+
+app.get("/listings", (req, res) => {
+  const version = req.query["v"] ?? "1";
+
+  if (version === "2") {
+    // return v2 response
+  } else {
+    // return v1 response
+  }
+});
+```
+
+Simple to implement but not recommended for production APIs.
+
+---
+
+## Implementing URL Versioning in Express
+
+### Basic setup
+
+```typescript
+import express from "express";
+import v1UsersRouter from "./routes/v1/users.routes.js";
+import v2UsersRouter from "./routes/v2/users.routes.js";
+import v1ListingsRouter from "./routes/v1/listings.routes.js";
+import v2ListingsRouter from "./routes/v2/listings.routes.js";
+
+const app = express();
+app.use(express.json());
+
+// v1 routes
+app.use("/v1/users", v1UsersRouter);
+app.use("/v1/listings", v1ListingsRouter);
+
+// v2 routes
+app.use("/v2/users", v2UsersRouter);
+app.use("/v2/listings", v2ListingsRouter);
+```
+
+### Using Express Router for versioning
+
+A cleaner approach — group all v1 routes under one router and all v2 routes under another:
+
+```typescript
+// src/routes/v1/index.ts
+import { Router } from "express";
+import usersRouter from "./users.routes.js";
+import listingsRouter from "./listings.routes.js";
+import bookingsRouter from "./bookings.routes.js";
+
+const v1Router = Router();
+
+v1Router.use("/users", usersRouter);
+v1Router.use("/listings", listingsRouter);
+v1Router.use("/bookings", bookingsRouter);
+
+export default v1Router;
+```
+
+```typescript
+// src/routes/v2/index.ts
+import { Router } from "express";
+import usersRouter from "./users.routes.js";
+import listingsRouter from "./listings.routes.js";
+import bookingsRouter from "./bookings.routes.js";
+
+const v2Router = Router();
+
+v2Router.use("/users", usersRouter);
+v2Router.use("/listings", listingsRouter);
+v2Router.use("/bookings", bookingsRouter);
+
+export default v2Router;
+```
+
+```typescript
+// src/index.ts
+import v1Router from "./routes/v1/index.js";
+import v2Router from "./routes/v2/index.js";
+
+app.use("/v1", v1Router);
+app.use("/v2", v2Router);
+```
+
+Now all v1 endpoints are under `/v1/...` and all v2 endpoints are under `/v2/...`.
+
+---
+
+## Structuring Versioned Code
+
+### Folder structure
+
+```
+src/
+├── controllers/
+│   ├── v1/
+│   │   ├── users.controller.ts
+│   │   └── listings.controller.ts
+│   └── v2/
+│       ├── users.controller.ts
+│       └── listings.controller.ts
+├── routes/
+│   ├── v1/
+│   │   ├── index.ts
+│   │   ├── users.routes.ts
+│   │   └── listings.routes.ts
+│   └── v2/
+│       ├── index.ts
+│       ├── users.routes.ts
+│       └── listings.routes.ts
+└── index.ts
+```
+
+### Sharing code between versions
+
+Most of your code stays the same between versions. Only the parts that changed need to be different. Use shared utilities, services, and Prisma queries:
+
+```typescript
+// src/services/listings.service.ts — shared between v1 and v2
+export async function getListingById(id: number) {
+  return prisma.listing.findUnique({
+    where: { id },
+    include: { host: true, bookings: true },
+  });
+}
+```
+
+```typescript
+// src/controllers/v1/listings.controller.ts
+import { getListingById } from "../../services/listings.service.js";
+
+export async function getListing(req: Request, res: Response) {
+  const listing = await getListingById(parseInt(req.params["id"] as string));
+  if (!listing) return res.status(404).json({ error: "Not found" });
+
+  // v1 — return host as a string
+  res.json({
+    ...listing,
+    host: listing.host.name,
+  });
+}
+```
+
+```typescript
+// src/controllers/v2/listings.controller.ts
+import { getListingById } from "../../services/listings.service.js";
+
+export async function getListing(req: Request, res: Response) {
+  const listing = await getListingById(parseInt(req.params["id"] as string));
+  if (!listing) return res.status(404).json({ error: "Not found" });
+
+  // v2 — return host as a full object
+  res.json(listing);
+}
+```
+
+The database query is shared. Only the response shape differs.
+
+### Services layer
+
+As your API grows, extract business logic into a **services layer** that both versions share:
+
+```
+src/
+├── services/
+│   ├── listings.service.ts    ← shared Prisma queries and business logic
+│   ├── users.service.ts
+│   └── bookings.service.ts
+├── controllers/
+│   ├── v1/                    ← format responses for v1
+│   └── v2/                    ← format responses for v2
+└── routes/
+    ├── v1/
+    └── v2/
+```
+
+This way, when you add a new version, you only write new controllers — not new database queries.
+
+---
+
+## Deprecating Old Versions
+
+When you release v2, v1 does not disappear immediately. You deprecate it — warn clients that it will be removed in the future, giving them time to migrate.
+
+### Deprecation header
+
+Add a `Deprecation` header to all v1 responses to warn clients:
+
+```typescript
+// src/middlewares/deprecation.ts
 import type { Request, Response, NextFunction } from "express";
 
-app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
-  console.error(err.stack);  // log full error server-side
-  res.status(500).json({ error: "Something went wrong" });  // generic message to client
-});
+export function deprecateV1(req: Request, res: Response, next: NextFunction) {
+  // Warn clients that v1 is deprecated
+  res.setHeader("Deprecation", "true");
+  res.setHeader("Sunset", "Sat, 01 Jan 2026 00:00:00 GMT"); // removal date
+  res.setHeader(
+    "Link",
+    '<https://your-api.com/v2>; rel="successor-version"'
+  );
+  next();
+}
 ```
 
-### 5. Add a 404 handler
-
-Add this just **before** the global error handler:
+Apply it to all v1 routes:
 
 ```typescript
-app.use((req: Request, res: Response) => {
-  res.status(404).json({ error: "Route not found" });
-});
+import { deprecateV1 } from "./middlewares/deprecation.js";
+
+app.use("/v1", deprecateV1, v1Router);
+app.use("/v2", v2Router);
 ```
 
-### 6. Add request logging with morgan
+Now every v1 response includes headers telling clients:
+- This version is deprecated
+- It will be removed on a specific date
+- Here is the link to the new version
 
-```bash
-npm install morgan
-npm install -D @types/morgan
-```
+### Deprecation timeline
+
+A good deprecation timeline:
+1. **Release v2** — announce v1 is deprecated, set a sunset date (at least 6 months away)
+2. **Add deprecation headers** to all v1 responses
+3. **Communicate** — email API users, update documentation, post in changelogs
+4. **Monitor** — track how many clients are still using v1
+5. **Sunset date** — remove v1 on the announced date
+
+### Sunset — removing a version
+
+When the sunset date arrives, return 410 Gone for all v1 requests:
 
 ```typescript
-import morgan from "morgan";
-
-// dev format in development, combined format in production
-app.use(process.env["NODE_ENV"] === "production" ? morgan("combined") : morgan("dev"));
-```
-
-`morgan("combined")` logs IP address, user agent, and response time — the standard format for production log analysis.
-
-### 7. Create a .env.example file
-
-Never commit your `.env` file. Create a `.env.example` with all variable names but no values — this tells teammates and your hosting platform what variables are needed:
-
-```env
-DATABASE_URL=
-JWT_SECRET=
-JWT_EXPIRES_IN=
-PORT=
-NODE_ENV=
-API_URL=
-```
-
-### 8. Verify your build works locally
-
-Before pushing to production, always test the build locally:
-
-```bash
-npm run build    # should compile without errors
-npm start        # should start the server from dist/
-```
-
-If it works locally, it will work in production.
-
----
-
-## Environment Variables in Production
-
-Your `.env` file stays on your local machine — it's in `.gitignore` and never pushed to GitHub. In production, you set environment variables through your hosting platform's dashboard.
-
-**Why not commit .env?**
-- It contains passwords, API keys, and secrets
-- Anyone with access to your GitHub repo could steal them
-- Different environments (dev, staging, production) need different values
-
-Every hosting platform has a way to set environment variables:
-- **Railway** → Project → Variables tab
-- **Render** → Service → Environment tab
-
-These are injected into `process.env` when your app starts — exactly like a `.env` file, but secure.
-
-### Production environment variables
-
-```
-DATABASE_URL=postgresql://...   ← provided by your hosted DB
-JWT_SECRET=<long-random-string> ← generate a strong one, never reuse dev secret
-JWT_EXPIRES_IN=7d
-PORT=                           ← leave empty, platform sets this automatically
-NODE_ENV=production
-API_URL=https://your-app.railway.app
-```
-
-**Generating a strong JWT_SECRET:**
-```bash
-node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
-```
-
----
-
-## Database Migration Strategy
-
-This is the most important part of deployment. Your local database and production database are completely separate — changes you make locally don't automatically appear in production.
-
-### How Prisma migrations work
-
-Every time you change your schema and run `prisma migrate dev`, Prisma creates a migration file in `prisma/migrations/`. These files are SQL — they describe exactly what changed.
-
-```
-prisma/migrations/
-├── 20240101_init/
-│   └── migration.sql          ← CREATE TABLE users ...
-├── 20240115_add_listings/
-│   └── migration.sql          ← CREATE TABLE listings ...
-└── 20240120_add_indexes/
-    └── migration.sql          ← CREATE INDEX ...
-```
-
-These migration files are committed to Git. When you deploy, you run `prisma migrate deploy` which applies any migrations that haven't been applied to the production database yet.
-
-### migrate dev vs migrate deploy
-
-| Command | Use in | What it does |
-|---------|--------|-------------|
-| `prisma migrate dev` | Development only | Creates migration file + applies it + regenerates client |
-| `prisma migrate deploy` | Production only | Applies pending migrations — never creates new ones |
-| `prisma migrate reset` | Development only | Drops everything and re-runs all migrations from scratch |
-| `prisma db push` | Prototyping only | Pushes schema changes without creating migration files |
-
-**Never run `prisma migrate dev` or `prisma migrate reset` in production** — they can drop your data.
-
-### Migration workflow
-
-```
-Local development:
-  1. Change schema.prisma
-  2. npx prisma migrate dev --name describe_the_change
-  3. Migration file created in prisma/migrations/
-  4. git add . && git commit && git push
-
-Production (automatic on deploy):
-  5. npx prisma migrate deploy
-  6. Pending migrations applied to production DB
-  7. App starts
-```
-
----
-
-## Migrating from Local to Production Database
-
-When you first deploy, your production database is empty. You need to apply all your local migrations to it.
-
-### Step 1 — Make sure all migrations are committed
-
-```bash
-git status   # prisma/migrations/ should be committed
-```
-
-### Step 2 — Set DATABASE_URL to your production database
-
-In your hosting platform's environment variables, set `DATABASE_URL` to your hosted database connection string.
-
-### Step 3 — Run migrations on deploy
-
-Add `prisma migrate deploy` to your build command in the hosting platform:
-
-```
-Build Command: npm run build && npx prisma migrate deploy
-Start Command: npm start
-```
-
-This runs automatically every time you deploy. Prisma tracks which migrations have already been applied — it only runs new ones.
-
-### Step 4 — Verify migrations ran
-
-After deploying, check your hosting platform's logs. You should see:
-
-```
-Applying migration `20240101_init`
-Applying migration `20240115_add_listings`
-Applying migration `20240120_add_indexes`
-Database connected successfully
-Server running on http://localhost:PORT
-```
-
-### What if a migration fails in production?
-
-Prisma wraps each migration in a transaction. If a migration fails halfway through, it rolls back automatically — your database stays in a consistent state.
-
-Check the logs for the error, fix the migration locally, test it, then redeploy.
-
-### Seeding production data
-
-If you need initial data in production (admin user, default categories, etc.), create a seed file:
-
-**prisma/seed.ts:**
-```typescript
-import prisma from "../src/config/prisma.js";
-
-async function seed() {
-  await prisma.user.upsert({
-    where: { email: "admin@example.com" },
-    update: {},
-    create: {
-      name: "Admin",
-      email: "admin@example.com",
-      username: "admin",
-    },
+app.use("/v1", (req, res) => {
+  res.status(410).json({
+    error: "API v1 has been discontinued. Please migrate to v2.",
+    documentation: "https://your-api.com/docs/migration-v1-to-v2",
   });
-
-  console.log("Seed completed");
-}
-
-seed()
-  .catch(console.error)
-  .finally(() => prisma.$disconnect());
+});
 ```
 
-Add to `package.json`:
-```json
-"prisma": {
-  "seed": "tsx prisma/seed.ts"
-}
-```
-
-Run locally:
-```bash
-npx prisma db seed
-```
-
-Use `upsert` instead of `create` in seeds — it won't fail if the record already exists.
+410 Gone is the correct status code — it means the resource existed but has been permanently removed.
 
 ---
 
-## Hosted Database Options
+## Versioning Best Practices
 
-Your local PostgreSQL database is only on your machine. In production you need a **hosted database** — a PostgreSQL instance running on a cloud server.
+### Start with versioning from day one
 
-| Service | Free Tier | Best for |
-|---------|----------|---------|
-| **Railway PostgreSQL** | 1GB storage | Easiest — same platform as your app, `DATABASE_URL` auto-configured |
-| **Neon** | 512MB, 10 branches | Serverless PostgreSQL, great free tier, branching for dev/prod |
-| **Supabase** | 500MB | Also gives you auth, storage, and realtime out of the box |
-| **Render PostgreSQL** | 1GB (90 days free) | Same platform as your app |
+Even if you only have v1, structure your routes as `/v1/...` from the beginning. Adding versioning later requires changing all your URLs which is itself a breaking change.
 
-### Connection string format
+```typescript
+// ✅ Do this from the start
+app.use("/v1/users", usersRouter);
 
-```
-postgresql://USERNAME:PASSWORD@HOST:PORT/DATABASE_NAME?sslmode=require
+// ❌ Don't do this and add versioning later
+app.use("/users", usersRouter);
 ```
 
-Most hosted databases require SSL (`sslmode=require`). Railway and Neon add this automatically.
+### Only version when you have breaking changes
 
-### Connection pooling in production
+Do not create a new version for every small change. Only create v2 when you have actual breaking changes. Non-breaking changes (adding fields, adding endpoints) can go into the existing version.
 
-Hosted databases have connection limits. With multiple server instances, you can hit the limit fast. Use a connection pooler:
+### Keep versions small and focused
 
-**Option 1 — PgBouncer (built into Railway and Supabase)**
+A new version should only change what needs to change. If only the listings endpoint changed, only `GET /v2/listings` needs to exist — everything else can still be on v1.
 
-Railway and Supabase provide a PgBouncer URL alongside the direct URL. Use the PgBouncer URL for your app:
+### Document the differences
 
-```env
-DATABASE_URL="postgresql://user:pass@host:6543/db?pgbouncer=true&connection_limit=1"
-```
-
-**Option 2 — Neon serverless driver**
-
-Neon has a serverless driver that handles pooling automatically — no configuration needed.
-
----
-
-## Deploying to Railway
-
-Railway is the easiest platform to deploy Node.js + PostgreSQL apps. It detects your project automatically and has a generous free tier.
-
-### Step 1 — Push your code to GitHub
-
-```bash
-git init
-git add .
-git commit -m "initial commit"
-git remote add origin https://github.com/yourusername/your-repo.git
-git push -u origin main
-```
-
-Make sure `.env` is NOT committed:
-```bash
-git status   # .env must not appear in the list
-```
-
-### Step 2 — Create a Railway account
-
-Go to [railway.app](https://railway.app) and sign up with GitHub.
-
-### Step 3 — Create a new project
-
-1. Click **New Project**
-2. Select **Deploy from GitHub repo**
-3. Select your repository
-4. Railway detects it's a Node.js app automatically
-
-### Step 4 — Add a PostgreSQL database
-
-1. In your project dashboard, click **New** → **Database** → **PostgreSQL**
-2. Railway creates a PostgreSQL instance
-3. `DATABASE_URL` is automatically added to your app's environment variables — you don't need to copy anything
-
-### Step 5 — Set environment variables
-
-Go to your service → **Variables** tab and add:
+When you release v2, document exactly what changed from v1:
 
 ```
-JWT_SECRET=<generate a strong random string>
-JWT_EXPIRES_IN=7d
-NODE_ENV=production
-API_URL=https://your-app.railway.app
+## Migration Guide: v1 → v2
+
+### GET /listings/:id
+- v1: `host` field is a string (host's name)
+- v2: `host` field is an object with `id`, `name`, `avatar`
+
+### POST /bookings
+- v1: requires `guestId` in request body
+- v2: `guestId` is derived from the JWT token — remove it from the request body
 ```
 
-Leave `PORT` and `DATABASE_URL` empty — Railway sets these automatically.
+### Use semantic versioning for major changes only
 
-### Step 6 — Set build and start commands
+API versions (`v1`, `v2`) represent **major** versions — breaking changes. Minor improvements and bug fixes do not need a new version number.
 
-Go to your service → **Settings** → **Deploy**:
+### Never break v1 while maintaining it
 
-```
-Build Command: npm run build && npx prisma generate && npx prisma migrate deploy
-Start Command: npm start
-```
-
-### Step 7 — Deploy
-
-Railway automatically deploys every time you push to your main branch. Watch the build logs — you should see migrations running and the server starting.
-
-Your app is live at `https://your-app.railway.app`.
-
-### Subsequent deployments
-
-Every `git push origin main` triggers a new deployment automatically:
-
-```bash
-# make changes locally
-git add .
-git commit -m "add bookings feature"
-git push origin main
-# Railway detects the push, builds, migrates, and deploys automatically
-```
-
----
-
-## Deploying to Render
-
-Render is another popular platform with a free tier for web services.
-
-### Step 1 — Create a Render account
-
-Go to [render.com](https://render.com) and sign up with GitHub.
-
-### Step 2 — Create a PostgreSQL database
-
-1. Click **New** → **PostgreSQL**
-2. Give it a name and select the free plan
-3. Click **Create Database**
-4. Copy the **Internal Database URL** — you'll need this in the next step
-
-### Step 3 — Create a Web Service
-
-1. Click **New** → **Web Service**
-2. Connect your GitHub repository
-3. Configure:
-
-```
-Name:          airbnb-api
-Environment:   Node
-Region:        closest to your users
-Build Command: npm install && npm run build && npx prisma generate && npx prisma migrate deploy
-Start Command: npm start
-```
-
-### Step 4 — Set environment variables
-
-Go to your web service → **Environment** tab:
-
-```
-DATABASE_URL=<paste the Internal Database URL from step 2>
-JWT_SECRET=<generate a strong random string>
-JWT_EXPIRES_IN=7d
-NODE_ENV=production
-API_URL=https://your-app.onrender.com
-```
-
-### Step 5 — Deploy
-
-Click **Create Web Service**. Render builds and deploys your app. It's live at `https://your-app.onrender.com`.
-
-> On Render's free tier, the service spins down after 15 minutes of inactivity and takes ~30 seconds to wake up on the next request. Upgrade to a paid plan to avoid this in production.
-
----
-
-## How It All Fits Together
-
-### Final project structure
-
-```
-my-app/
-├── prisma/
-│   ├── migrations/          ← committed to Git — applied on deploy
-│   │   ├── 20240101_init/
-│   │   └── 20240115_add_listings/
-│   ├── seed.ts              ← optional seed data
-│   └── schema.prisma
-├── src/
-│   ├── config/
-│   │   └── prisma.ts
-│   ├── controllers/
-│   ├── middlewares/
-│   ├── routes/
-│   └── index.ts
-├── dist/                    ← compiled output (gitignored)
-├── .env                     ← local only, never commit
-├── .env.example             ← commit this
-├── .gitignore
-├── package.json
-├── prisma.config.ts
-└── tsconfig.json
-```
-
-### Full deployment flow
-
-```
-Local Development
-  ↓
-Change schema → npx prisma migrate dev --name change_name
-  ↓
-git add . && git commit && git push origin main
-  ↓
-Railway / Render detects push
-  ↓
-npm install
-  ↓
-npm run build  (tsc → compiles TypeScript to dist/)
-  ↓
-npx prisma generate  (regenerates Prisma Client)
-  ↓
-npx prisma migrate deploy  (applies new migrations to production DB)
-  ↓
-npm start  (node dist/index.js)
-  ↓
-App live at https://your-app.railway.app
-```
-
-### Checklist before deploying
-
-- [ ] `PORT` reads from `process.env["PORT"]` with a fallback
-- [ ] All secrets are in `.env` and `.env` is in `.gitignore`
-- [ ] `.env.example` exists with all variable names
-- [ ] `npm run build` compiles without TypeScript errors
-- [ ] `npm start` runs the compiled output correctly
-- [ ] All `prisma/migrations/` files are committed to Git
-- [ ] `prisma migrate deploy` is in the build command
-- [ ] Global error handler is the last middleware
-- [ ] 404 handler is just before the error handler
-- [ ] Health check at `GET /health` returns 200
-- [ ] `NODE_ENV=production` is set in the platform
-
-### Checklist after deploying
-
-- [ ] App is accessible at the public URL
-- [ ] `/health` returns `{ status: "ok" }`
-- [ ] `/api-docs` loads Swagger UI
-- [ ] Can register a user
-- [ ] Can login and get a token
-- [ ] Protected routes work with the token
-- [ ] Database migrations ran — check platform logs
+Once v1 is live, treat it as frozen. Do not add new required fields, do not change response shapes, do not remove endpoints. Only bug fixes are acceptable.
 
 ---
 
@@ -572,28 +515,21 @@ App live at https://your-app.railway.app
 
 | Concept | What it is |
 |---------|------------|
-| Deployment | Running your app on a cloud server accessible on the internet |
-| Production | The live environment real users interact with |
-| `npm run build` | Compiles TypeScript to JavaScript for production |
-| `npm start` | Runs the compiled JavaScript in production |
-| `prisma migrate deploy` | Applies pending migrations in production — safe, no resets |
-| `prisma migrate dev` | Development only — creates + applies migrations |
-| Migration file | SQL file that records a schema change — committed to Git |
-| Seed | Script to insert initial data into the database |
-| `.env.example` | Template showing what variables are needed — safe to commit |
-| Railway | Cloud hosting platform — easiest Node.js + PostgreSQL deployment |
-| Render | Alternative cloud hosting platform with a free tier |
-| Neon | Serverless PostgreSQL — great free tier with branching |
-| Health check | Endpoint that returns 200 — hosting platforms use it to verify your app is running |
-| Global error handler | Last middleware — catches all unhandled errors, returns generic message |
-| PgBouncer | PostgreSQL connection pooler — built into Railway and Supabase |
+| Breaking change | A change that causes existing clients to stop working |
+| Non-breaking change | Adding new fields or endpoints — safe to deploy without versioning |
+| URL path versioning | Version in the URL: `/v1/listings`, `/v2/listings` — most common |
+| Header versioning | Version in a request header: `Accept-Version: 2` |
+| Query param versioning | Version as a query param: `/listings?v=2` |
+| Deprecation | Warning clients that a version will be removed — add `Deprecation` header |
+| Sunset | The date a deprecated version is removed — return 410 Gone after this date |
+| Services layer | Shared business logic and database queries used by all versions |
+| 410 Gone | HTTP status for a resource that existed but has been permanently removed |
+| Migration guide | Documentation explaining what changed between versions |
 
 ---
 
 **Resources:**
-- [Railway Docs](https://docs.railway.app)
-- [Render Docs](https://render.com/docs)
-- [Neon PostgreSQL](https://neon.tech)
-- [Supabase](https://supabase.com)
-- [Prisma Deploy Guide](https://www.prisma.io/docs/guides/deployment)
-- [Prisma Migrate Deploy](https://www.prisma.io/docs/orm/reference/prisma-cli-reference#migrate-deploy)
+- [Stripe API Versioning](https://stripe.com/docs/api/versioning)
+- [GitHub REST API Versioning](https://docs.github.com/en/rest/overview/api-versions)
+- [OpenAPI Versioning Guide](https://swagger.io/blog/api-versioning/api-versioning-best-practices/)
+- [RFC 8594 — Sunset Header](https://www.rfc-editor.org/rfc/rfc8594)
