@@ -607,89 +607,56 @@ For this course, the in-memory cache is sufficient. In production with multiple 
 
 ### The Problem
 
-Without rate limiting, a single IP address can send unlimited requests to your API. This causes two types of problems:
+Without rate limiting, a single client can send thousands of requests per second to your API — intentionally (DDoS attack) or accidentally (buggy client). This can crash your server or database.
 
-**Intentional abuse — DDoS attacks:**
-An attacker sends 10,000 requests per second to your server. Your Node.js process maxes out its CPU. Your PostgreSQL connection pool fills up. Your server stops responding to legitimate users.
-
-**Accidental abuse — buggy clients:**
-A mobile app has a bug that puts an API call in an infinite loop. One user's phone sends 500 requests per second without them knowing. Same result.
-
-**Rate limiting** restricts how many requests a single client (identified by IP address) can make in a time window. Once they hit the limit, they get `429 Too Many Requests` until the window resets.
+**Rate limiting** restricts how many requests a client can make in a time window.
 
 ```
-Window: 15 minutes, limit: 100 requests
-
-Client sends request 1-100:   200 OK
-Client sends request 101:     429 Too Many Requests
-Client sends request 102-200: 429 Too Many Requests
-... (until 15 minutes resets)
-Client sends request 201:     200 OK  (window reset)
+Client sends 1000 requests/second
+Rate limiter allows 100 requests/minute per IP
+→ After 100 requests, client gets 429 Too Many Requests
 ```
 
-### Setup
+### Setup with express-rate-limit
 
 ```bash
 npm install express-rate-limit
 ```
 
-**src/middlewares/rateLimiter.ts:**
 ```typescript
 import rateLimit from "express-rate-limit";
 
-// General limiter — applies to all routes
-export const generalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,  // 15 minute window
-  max: 100,                   // 100 requests per window per IP
-  standardHeaders: true,      // include rate limit info in response headers
-  legacyHeaders: false,
-  message: {
-    error: "Too many requests from this IP, please try again after 15 minutes",
-  },
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,  // 15 minutes
+  max: 100,                   // max 100 requests per window per IP
+  message: { error: "Too many requests, please try again later" },
+  standardHeaders: true,      // sends rate limit info in response headers
 });
 
-// Strict limiter — for sensitive endpoints like login and register
-export const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,  // only 10 attempts per 15 minutes
-  message: {
-    error: "Too many attempts, please try again after 15 minutes",
-  },
-});
+app.use(limiter);  // apply to all routes
 ```
 
-**Apply in src/index.ts:**
+### Different limits for different routes
+
 ```typescript
-import { generalLimiter, authLimiter } from "./middlewares/rateLimiter.js";
+const generalLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100 });
+const strictLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10 });
 
-// Apply general limiter to all routes
-app.use(generalLimiter);
-
-// Apply strict limiter specifically to auth endpoints
-app.use("/api/v1/auth/login", authLimiter);
-app.use("/api/v1/auth/register", authLimiter);
-app.use("/api/v1/auth/forgot-password", authLimiter);
+app.use("/api", generalLimiter);
+app.use("/auth/login", strictLimiter);   // stricter limit on login
+app.use("/auth/register", strictLimiter);
 ```
-
-### Why stricter limits on auth routes?
-
-Login and register endpoints are the most abused. Without strict limits:
-- **Brute force attacks** — attacker tries thousands of password combinations on a known email
-- **Credential stuffing** — attacker tries username/password pairs leaked from other sites
-- **Account enumeration** — attacker probes register to find which emails are registered
-
-10 attempts per 15 minutes makes all of these attacks impractical.
 
 ### Response headers
 
-When `standardHeaders: true` is set, every response includes:
+When rate limiting is active, the client receives headers:
 ```
-RateLimit-Limit: 100
-RateLimit-Remaining: 87
-RateLimit-Reset: 2024-01-01T12:15:00.000Z
+X-RateLimit-Limit: 100
+X-RateLimit-Remaining: 87
+X-RateLimit-Reset: 1714000000
 ```
 
-Well-built clients read these headers and slow down automatically before hitting the limit.
+This lets clients know how many requests they have left and when the window resets.
 
 ---
 
@@ -697,25 +664,16 @@ Well-built clients read these headers and slow down automatically before hitting
 
 ### The Problem
 
-Every byte your API sends travels over the network. A `GET /listings` response with 50 listings might be 80KB of JSON. On a slow mobile connection, that's noticeable. Multiply by thousands of requests per minute and you're burning bandwidth unnecessarily.
+Every response your API sends travels over the network. Large JSON responses waste bandwidth and slow down the client.
 
-**Compression** shrinks the response body before sending it over the network. The client decompresses it automatically. JSON compresses extremely well because it has lots of repeated keys and whitespace.
+**Compression** shrinks the response body before sending it. The client decompresses it automatically. A 100KB response can become 10KB — a 90% reduction.
 
 ```
-Without compression:  80KB JSON  → network → client
-With gzip:            12KB gzip  → network → client (85% smaller)
+Without compression:  100KB JSON → network → client
+With compression:     10KB gzip  → network → client (10x faster)
 ```
 
-### How it works
-
-1. Client sends request with header: `Accept-Encoding: gzip, deflate`
-2. Server sees this header, compresses the response body with gzip
-3. Server sends response with header: `Content-Encoding: gzip`
-4. Client automatically decompresses — your code doesn't need to do anything
-
-All modern browsers, Postman, and HTTP clients send `Accept-Encoding: gzip` by default. You get compression for free on every request.
-
-### Setup
+### Setup with compression middleware
 
 ```bash
 npm install compression
@@ -725,31 +683,25 @@ npm install -D @types/compression
 ```typescript
 import compression from "compression";
 
-// Add before all routes — order matters
-app.use(compression());
+app.use(compression());  // compress all responses
 ```
 
-That's it. One line. Every response is now compressed automatically.
+That's it. Express will automatically compress responses using gzip when the client supports it (all modern browsers and HTTP clients do).
 
-### Compression threshold
+### How it works
 
-Compressing tiny responses (like `{ "message": "ok" }`) wastes CPU for no benefit. The default threshold is 1KB — responses smaller than that are not compressed.
+1. Client sends request with header: `Accept-Encoding: gzip`
+2. Server compresses response and sends: `Content-Encoding: gzip`
+3. Client decompresses automatically
+
+### When compression helps most
+
+Compression is most effective on large text-based responses — JSON, HTML, CSS. It has little effect on already-compressed formats like images or videos.
 
 ```typescript
-app.use(compression({ threshold: 1024 }));  // only compress responses > 1KB
+// Only compress responses larger than 1KB (default is 1KB)
+app.use(compression({ threshold: 1024 }));
 ```
-
-### What compresses well vs what doesn't
-
-| Content type | Compression benefit |
-|-------------|--------------------|
-| JSON responses | ✅ Excellent — 60-90% smaller |
-| HTML, CSS, JS | ✅ Excellent |
-| Plain text | ✅ Good |
-| Already-compressed images (JPEG, PNG) | ❌ None — already compressed |
-| Binary data | ❌ Minimal |
-
-For an API that returns JSON, compression is always worth enabling.
 
 ---
 
@@ -757,81 +709,63 @@ For an API that returns JSON, compression is always worth enabling.
 
 ### The Problem
 
-Every time your app talks to PostgreSQL, it needs a **connection** — a persistent TCP socket between your Node.js process and the database server. Opening a connection involves:
-- TCP handshake
-- SSL negotiation
-- PostgreSQL authentication
-- Session setup
-
-This takes 20-50ms. If your app opens a new connection for every request and closes it after, you're adding 20-50ms of overhead to every single database operation.
+Opening a database connection is expensive — it involves a TCP handshake, authentication, and setup. If your app opens a new connection for every request and closes it after, you're wasting time on every single request.
 
 ```
-Without pooling (new connection per request):
-  Request → open connection (40ms) → query (5ms) → close connection → Response
-  Total: 45ms, 40ms of which is wasted on connection setup
+Without pooling:
+Request → open connection (50ms) → query (5ms) → close connection → Response
 
-With pooling (reuse existing connections):
-  Request → get connection from pool (0ms) → query (5ms) → return to pool → Response
-  Total: 5ms
+With pooling:
+Request → reuse existing connection (0ms) → query (5ms) → Response
 ```
 
-### How connection pooling works
+**Connection pooling** keeps a set of connections open and reuses them across requests.
 
-A connection pool keeps a set of connections open and ready. When a request comes in, it borrows a connection from the pool, uses it, and returns it when done. The connection stays open for the next request.
+### How Prisma handles pooling
 
-```
-Pool with max=10:
+Prisma has built-in connection pooling. By default it maintains a pool of connections based on your CPU count.
 
-  [conn1] [conn2] [conn3] [conn4] [conn5] [conn6] [conn7] [conn8] [conn9] [conn10]
-     ↓        ↓
-  Request A  Request B   (8 connections idle, ready for next requests)
-```
+You can configure the pool size in your connection string:
 
-### Prisma's built-in pooling
-
-Prisma has connection pooling built in. By default it creates a pool sized to `num_physical_cpus * 2 + 1`. For most development machines that's 5-9 connections.
-
-You can configure it via the connection string:
 ```env
-DATABASE_URL="postgresql://postgres:password@localhost:5432/airbnb_db?connection_limit=10"
+DATABASE_URL="postgresql://postgres:1234@localhost:5432/my_app?connection_limit=10"
 ```
 
-### Explicit pooling with pg.Pool
+Or via the adapter:
 
-For more control, configure the pool explicitly using `pg.Pool` and pass it to Prisma:
-
-**src/config/prisma.ts:**
 ```typescript
-import { PrismaClient } from "../../generated/prisma/index.js";
-import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
+import { PrismaPg } from "@prisma/adapter-pg";
 
 const pool = new Pool({
   connectionString: process.env["DATABASE_URL"] as string,
-  max: 10,                    // maximum open connections
-  idleTimeoutMillis: 30000,   // close a connection if idle for 30s
-  connectionTimeoutMillis: 2000, // fail if can't get a connection within 2s
+  max: 10,              // maximum connections in the pool
+  idleTimeoutMillis: 30000,   // close idle connections after 30s
+  connectionTimeoutMillis: 2000,  // fail if can't connect within 2s
 });
 
 const adapter = new PrismaPg(pool);
-export const prisma = new PrismaClient({ adapter });
+const prisma = new PrismaClient({ adapter });
 ```
 
 ### Pool size guidelines
 
-Don't set the pool too large. PostgreSQL has a default maximum of 100 connections. If you have 5 server instances each with `max: 30`, that's 150 connections — over the limit, and new connections will be rejected.
+| Environment | Recommended pool size |
+|-------------|----------------------|
+| Development | 2-5 |
+| Small production | 5-10 |
+| Medium production | 10-20 |
+| Large production | 20-50 |
 
-| Environment | Recommended `max` |
-|-------------|-------------------|
-| Development | 5 |
-| Single server production | 10-20 |
-| Multiple server instances | `floor(100 / num_instances) - 5` |
+Don't set it too high — PostgreSQL has a maximum connection limit (default 100). If you have 5 server instances each with a pool of 30, that's 150 connections — over the limit.
 
-### What happens when the pool is full
+### Prisma Accelerate (production pooling)
 
-If all connections are in use and a new request comes in, it waits up to `connectionTimeoutMillis` for a connection to become available. If none frees up in time, the request fails with a connection timeout error.
+For production apps with multiple server instances, use **Prisma Accelerate** — a connection pooler that sits between your app and database, managing thousands of connections efficiently.
 
-This is why `connectionTimeoutMillis: 2000` is important — it fails fast with a clear error instead of hanging forever.
+```env
+DATABASE_URL="prisma://accelerate.prisma-data.net/?api_key=your_key"
+```
 
 ---
 
