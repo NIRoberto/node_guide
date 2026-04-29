@@ -483,7 +483,7 @@ When you deploy, your app runs on someone else's computer (a cloud server) inste
 ```
 Local machine (only you)         Cloud server (everyone)
 ─────────────────────────        ──────────────────────────
-localhost:3000                   https://your-app.railway.app
+localhost:3000                   https://your-app.onrender.com
 Local PostgreSQL                 Hosted PostgreSQL
 .env file                        Platform environment variables
 Manual restart                   Auto-restart on crash
@@ -629,7 +629,6 @@ Your `.env` file stays on your local machine — it's in `.gitignore` and never 
 - Different environments (dev, staging, production) need different values
 
 Every hosting platform has a way to set environment variables:
-- **Railway** → Project → Variables tab
 - **Render** → Service → Environment tab
 
 These are injected into `process.env` when your app starts — exactly like a `.env` file, but secure.
@@ -642,7 +641,7 @@ JWT_SECRET=<long-random-string> ← generate a strong one, never reuse dev secre
 JWT_EXPIRES_IN=7d
 PORT=                           ← leave empty, platform sets this automatically
 NODE_ENV=production
-API_URL=https://your-app.railway.app
+API_URL=https://your-app.onrender.com
 ```
 
 **Generating a strong JWT_SECRET:**
@@ -823,9 +822,9 @@ Neon has a serverless driver that handles pooling automatically — no configura
 
 ---
 
-## Deploying to Railway
+## Deploying to Render
 
-Railway is the easiest platform to deploy Node.js + PostgreSQL apps. It detects your project automatically and has a generous free tier.
+Render is a cloud platform with a free tier for web services and PostgreSQL databases — easy to set up and works great for Node.js apps.
 
 ### Step 1 — Push your code to GitHub
 
@@ -842,81 +841,18 @@ Make sure `.env` is NOT committed:
 git status   # .env must not appear in the list
 ```
 
-### Step 2 — Create a Railway account
-
-Go to [railway.app](https://railway.app) and sign up with GitHub.
-
-### Step 3 — Create a new project
-
-1. Click **New Project**
-2. Select **Deploy from GitHub repo**
-3. Select your repository
-4. Railway detects it's a Node.js app automatically
-
-### Step 4 — Add a PostgreSQL database
-
-1. In your project dashboard, click **New** → **Database** → **PostgreSQL**
-2. Railway creates a PostgreSQL instance
-3. `DATABASE_URL` is automatically added to your app's environment variables — you don't need to copy anything
-
-### Step 5 — Set environment variables
-
-Go to your service → **Variables** tab and add:
-
-```
-JWT_SECRET=<generate a strong random string>
-JWT_EXPIRES_IN=7d
-NODE_ENV=production
-API_URL=https://your-app.railway.app
-```
-
-Leave `PORT` and `DATABASE_URL` empty — Railway sets these automatically.
-
-### Step 6 — Set build and start commands
-
-Go to your service → **Settings** → **Deploy**:
-
-```
-Build Command: npm run build && npx prisma generate && npx prisma migrate deploy
-Start Command: npm start
-```
-
-### Step 7 — Deploy
-
-Railway automatically deploys every time you push to your main branch. Watch the build logs — you should see migrations running and the server starting.
-
-Your app is live at `https://your-app.railway.app`.
-
-### Subsequent deployments
-
-Every `git push origin main` triggers a new deployment automatically:
-
-```bash
-# make changes locally
-git add .
-git commit -m "add bookings feature"
-git push origin main
-# Railway detects the push, builds, migrates, and deploys automatically
-```
-
----
-
-## Deploying to Render
-
-Render is another popular platform with a free tier for web services.
-
-### Step 1 — Create a Render account
+### Step 2 — Create a Render account
 
 Go to [render.com](https://render.com) and sign up with GitHub.
 
-### Step 2 — Create a PostgreSQL database
+### Step 3 — Create a PostgreSQL database
 
 1. Click **New** → **PostgreSQL**
-2. Give it a name and select the free plan
+2. Give it a name (e.g. `airbnb-db`) and select the free plan
 3. Click **Create Database**
 4. Copy the **Internal Database URL** — you'll need this in the next step
 
-### Step 3 — Create a Web Service
+### Step 4 — Create a Web Service
 
 1. Click **New** → **Web Service**
 2. Connect your GitHub repository
@@ -930,23 +866,37 @@ Build Command: npm install && npm run build && npx prisma generate && npx prisma
 Start Command: npm start
 ```
 
-### Step 4 — Set environment variables
+### Step 5 — Set environment variables
 
-Go to your web service → **Environment** tab:
+Go to your web service → **Environment** tab and add:
 
 ```
-DATABASE_URL=<paste the Internal Database URL from step 2>
+DATABASE_URL=<paste the Internal Database URL from step 3>
 JWT_SECRET=<generate a strong random string>
 JWT_EXPIRES_IN=7d
 NODE_ENV=production
 API_URL=https://your-app.onrender.com
 ```
 
-### Step 5 — Deploy
+### Step 6 — Deploy
 
-Click **Create Web Service**. Render builds and deploys your app. It's live at `https://your-app.onrender.com`.
+Click **Create Web Service**. Render builds and deploys your app automatically. Watch the build logs — you should see migrations running and the server starting.
+
+Your app is live at `https://your-app.onrender.com`.
 
 > On Render's free tier, the service spins down after 15 minutes of inactivity and takes ~30 seconds to wake up on the next request. Upgrade to a paid plan to avoid this in production.
+
+### Subsequent deployments
+
+Every `git push origin main` triggers a new deployment automatically:
+
+```bash
+# make changes locally
+git add .
+git commit -m "add bookings feature"
+git push origin main
+# Render detects the push, builds, migrates, and deploys automatically
+```
 
 ---
 
@@ -987,7 +937,7 @@ Change schema → npx prisma migrate dev --name change_name
   ↓
 git add . && git commit && git push origin main
   ↓
-Railway / Render detects push
+Render detects push
   ↓
 npm install
   ↓
@@ -999,7 +949,7 @@ npx prisma migrate deploy  (applies new migrations to production DB)
   ↓
 npm start  (node dist/index.js)
   ↓
-App live at https://your-app.railway.app
+App live at https://your-app.onrender.com
 ```
 
 ### Checklist before deploying
@@ -1051,8 +1001,7 @@ App live at https://your-app.railway.app
 | Migration file | SQL file that records a schema change — committed to Git |
 | Seed | Script to insert initial data into the database |
 | `.env.example` | Template showing what variables are needed — safe to commit |
-| Railway | Cloud hosting platform — easiest Node.js + PostgreSQL deployment |
-| Render | Alternative cloud hosting platform with a free tier |
+| Render | Cloud hosting platform with a free tier for Node.js + PostgreSQL |
 | Neon | Serverless PostgreSQL — great free tier with branching |
 | Health check | Endpoint that returns 200 — hosting platforms use it to verify your app is running |
 | Global error handler | Last middleware — catches all unhandled errors, returns generic message |
@@ -1061,7 +1010,6 @@ App live at https://your-app.railway.app
 ---
 
 **Resources:**
-- [Railway Docs](https://docs.railway.app)
 - [Render Docs](https://render.com/docs)
 - [Neon PostgreSQL](https://neon.tech)
 - [Supabase](https://supabase.com)

@@ -361,44 +361,43 @@ Verify `.env` is NOT in the repository:
 git status   # .env must not appear
 ```
 
-### 2. Create Railway project
+### 2. Create Render project
 
-1. Go to [railway.app](https://railway.app)
+1. Go to [render.com](https://render.com)
 2. Sign up with GitHub
-3. Click **New Project** → **Deploy from GitHub repo**
+3. Click **New** → **Web Service**
 4. Select your repository
 
 ### 3. Add PostgreSQL database
 
-1. In your project, click **New** → **Database** → **PostgreSQL**
-2. Railway creates a PostgreSQL instance
-3. `DATABASE_URL` is automatically added to your app's environment variables
+1. Click **New** → **PostgreSQL**
+2. Select the free plan and click **Create Database**
+3. Copy the **Internal Database URL**
 
 ### 4. Set environment variables
 
-Go to your service → **Variables** tab:
+Go to your service → **Environment** tab:
 
 ```
+DATABASE_URL=<paste the Internal Database URL from step 3>
 JWT_SECRET=<generate with: node -e "console.log(require('crypto').randomBytes(64).toString('hex'))">
 JWT_EXPIRES_IN=7d
 NODE_ENV=production
-API_URL=https://your-app.railway.app
+API_URL=https://your-app.onrender.com
 ```
-
-Leave `PORT` and `DATABASE_URL` empty — Railway sets these automatically.
 
 ### 5. Configure build and start commands
 
-Go to **Settings** → **Deploy**:
+Go to **Settings** → **Build & Deploy**:
 
 ```
-Build Command: npm run build && npx prisma generate && npx prisma migrate deploy
+Build Command: npm install && npm run build && npx prisma generate && npx prisma migrate deploy
 Start Command: npm start
 ```
 
 ### 6. Deploy
 
-Railway automatically deploys. Watch the build logs — you should see:
+Click **Create Web Service**. Render builds and deploys. Watch the build logs — you should see:
 
 ```
 > npm run build
@@ -412,7 +411,7 @@ Database connected successfully
 Server running on http://localhost:PORT
 ```
 
-Your app is live at `https://your-app.railway.app`.
+Your app is live at `https://your-app.onrender.com`.
 
 ---
 
@@ -422,19 +421,19 @@ Test every critical endpoint in production:
 
 ### 1. Health check
 ```
-GET https://your-app.railway.app/health
+GET https://your-app.onrender.com/health
 ```
 Should return `{ status: "ok", ... }`
 
 ### 2. Swagger UI
 ```
-https://your-app.railway.app/api-docs
+https://your-app.onrender.com/api-docs
 ```
 Should load the interactive documentation
 
 ### 3. Register a user
 ```
-POST https://your-app.railway.app/api/v1/auth/register
+POST https://your-app.onrender.com/api/v1/auth/register
 {
   "name": "Test User",
   "email": "test@example.com",
@@ -448,7 +447,7 @@ Should return `201` with the created user
 
 ### 4. Login
 ```
-POST https://your-app.railway.app/api/v1/auth/login
+POST https://your-app.onrender.com/api/v1/auth/login
 {
   "email": "test@example.com",
   "password": "password123"
@@ -460,7 +459,7 @@ Should return `200` with a token
 
 Copy the token from step 4, then:
 ```
-GET https://your-app.railway.app/api/v1/users
+GET https://your-app.onrender.com/api/v1/users
 Authorization: Bearer <your-token>
 ```
 Should return `200` with a list of users
@@ -469,7 +468,7 @@ Should return `200` with a list of users
 
 First register a host user, login, then:
 ```
-POST https://your-app.railway.app/api/v1/listings
+POST https://your-app.onrender.com/api/v1/listings
 Authorization: Bearer <host-token>
 {
   "title": "Cozy Apartment",
@@ -485,13 +484,13 @@ Should return `201` with the created listing
 
 ### 7. Test pagination
 ```
-GET https://your-app.railway.app/api/v1/listings?page=1&limit=5
+GET https://your-app.onrender.com/api/v1/listings?page=1&limit=5
 ```
 Should return paginated listings with `meta` object
 
 ### 8. Test search
 ```
-GET https://your-app.railway.app/api/v1/listings/search?location=New York&type=apartment
+GET https://your-app.onrender.com/api/v1/listings/search?location=New York&type=apartment
 ```
 Should return filtered listings
 
@@ -501,12 +500,7 @@ Should return filtered listings
 
 ### 1. Check migrations ran
 
-In Railway, go to your service → **Deployments** → click the latest deployment → **View Logs**
-
-Search for:
-```
-Applying migration
-```
+In Render, go to your service → **Logs** tab and search for `Applying migration`.
 
 You should see all your migrations applied.
 
@@ -549,7 +543,7 @@ Now that your app is deployed, every `git push` triggers a new deployment automa
    git commit -m "update response message"
    git push origin main
    ```
-3. Go to Railway → watch the build logs
+3. Go to Render → watch the build logs
 4. Once deployed, verify the change is live
 
 ### Add a new feature with a migration
@@ -565,7 +559,7 @@ Now that your app is deployed, every `git push` triggers a new deployment automa
    git commit -m "add verified field to users"
    git push origin main
    ```
-4. Railway automatically runs `prisma migrate deploy` during build
+4. Render automatically runs `prisma migrate deploy` during build
 5. The new field is now in production
 
 ---
@@ -675,7 +669,7 @@ Or use Railway's PgBouncer URL instead of the direct URL.
 - [ ] 404 handler catches unknown routes
 - [ ] `PORT` reads from `process.env["PORT"]`
 - [ ] `NODE_ENV=production` is set in the platform
-- [ ] All environment variables are set in the platform
+- [ ] All environment variables are set in Render
 - [ ] App is accessible at the public URL
 - [ ] Swagger UI works in production at `/api-docs`
 - [ ] Can register, login, and access protected routes via `/api/v1/`
