@@ -1,20 +1,192 @@
 # Lesson 7: API Versioning & Deployment
 
 ## Table of Contents
-1. [What is API Versioning?](#what-is-api-versioning)
-2. [Why Version Before Deploying](#why-version-before-deploying)
-3. [URL Path Versioning in Express](#url-path-versioning-in-express)
-4. [Deprecation Headers](#deprecation-headers)
-5. [What is Deployment?](#what-is-deployment)
-6. [Development vs Production](#development-vs-production)
-7. [Preparing Your App for Production](#preparing-your-app-for-production)
-8. [Environment Variables in Production](#environment-variables-in-production)
-9. [Database Migration Strategy](#database-migration-strategy)
-10. [Migrating from Local to Production Database](#migrating-from-local-to-production-database)
-11. [Hosted Database Options](#hosted-database-options)
-12. [Deploying to Railway](#deploying-to-railway)
-13. [Deploying to Render](#deploying-to-render)
-14. [How It All Fits Together](#how-it-all-fits-together)
+1. [Changing IDs from Int to UUID](#changing-ids-from-int-to-uuid)
+2. [What is API Versioning?](#what-is-api-versioning)
+3. [Why Version Before Deploying](#why-version-before-deploying)
+4. [URL Path Versioning in Express](#url-path-versioning-in-express)
+5. [Deprecation Headers](#deprecation-headers)
+6. [What is Deployment?](#what-is-deployment)
+7. [Development vs Production](#development-vs-production)
+8. [Preparing Your App for Production](#preparing-your-app-for-production)
+9. [Environment Variables in Production](#environment-variables-in-production)
+10. [Database Migration Strategy](#database-migration-strategy)
+11. [Migrating from Local to Production Database](#migrating-from-local-to-production-database)
+12. [Hosted Database Options](#hosted-database-options)
+13. [Deploying to Railway](#deploying-to-railway)
+14. [Deploying to Render](#deploying-to-render)
+15. [How It All Fits Together](#how-it-all-fits-together)
+
+---
+
+## Changing IDs from Int to UUID
+
+### Why UUID over Int?
+
+So far all your models use `Int` with `autoincrement()` for IDs:
+
+```prisma
+id Int @id @default(autoincrement())
+```
+
+This works fine locally, but has real problems in production:
+
+- **Predictable** — anyone can guess other users' IDs (`/users/1`, `/users/2`, `/users/3`)
+- **Enumerable** — attackers can scrape all your data by incrementing the ID
+- **Merge conflicts** — if you ever have multiple databases or data imports, IDs collide
+- **Leaks business data** — your 5th user has `id: 5` — competitors know how many users you have
+
+**UUID** (Universally Unique Identifier) solves all of this:
+
+```
+Int ID:   1, 2, 3, 4, 5
+UUID:     a3f8c2d1-4b5e-4f6a-8c9d-1e2f3a4b5c6d
+```
+
+UUIDs are random 128-bit values — impossible to guess, globally unique, and reveal nothing about your data.
+
+### Update the Prisma schema
+
+Change every model's `id` field from `Int @default(autoincrement())` to `String @default(uuid())`:
+
+```prisma
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  username  String   @unique
+  password  String
+  role      Role     @default(GUEST)
+  listings  Listing[]
+  bookings  Booking[]
+  createdAt DateTime @default(now())
+}
+
+model Listing {
+  id            String   @id @default(uuid())
+  title         String
+  location      String
+  pricePerNight Float
+  guests        Int
+  type          String
+  userId        String   // foreign keys also become String
+  user          User     @relation(fields: [userId], references: [id])
+  bookings      Booking[]
+  createdAt     DateTime @default(now())
+}
+
+model Booking {
+  id        String   @id @default(uuid())
+  checkIn   DateTime
+  checkOut  DateTime
+  total     Float
+  status    String   @default("confirmed")
+  userId    String
+  listingId String
+  user      User     @relation(fields: [userId], references: [id])
+  listing   Listing  @relation(fields: [listingId], references: [id])
+  createdAt DateTime @default(now())
+}
+```
+
+Key changes:
+- `id Int` → `id String`
+- `@default(autoincrement())` → `@default(uuid())`
+- All foreign keys (`userId`, `listingId`) → `String`
+
+### Run the migration
+
+```bash
+npx prisma migrate dev --name change_ids_to_uuid
+```
+
+> If you have existing data with integer IDs, you need to reset the database first since you can't convert integers to UUIDs in place:
+> ```bash
+> npx prisma migrate reset
+> ```
+
+### Update your TypeScript types
+
+Anywhere you used `parseInt()` to convert route params to numbers, remove it — IDs are now strings:
+
+```typescript
+// ❌ Before — parseInt because id was a number
+export async function getUserById(req: Request, res: Response) {
+  const id = parseInt(req.params["id"] as string);
+  const user = await prisma.user.findUnique({ where: { id } });
+  ...
+}
+
+// ✅ After — id is already a string, no conversion needed
+export async function getUserById(req: Request, res: Response) {
+  const id = req.params["id"] as string;
+  const user = await prisma.user.findUnique({ where: { id } });
+  ...
+}
+```
+
+Also update any TypeScript interfaces or types that referenced `id: number`:
+
+```typescript
+// ❌ Before
+interface User {
+  id: number;
+  name: string;
+}
+
+// ✅ After
+interface User {
+  id: string;
+  name: string;
+}
+```
+
+And the `AuthRequest` interface in your auth middleware:
+
+```typescript
+export interface AuthRequest extends Request {
+  userId?: string;  // was number, now string
+  role?: string;
+}
+```
+
+And the JWT payload:
+
+```typescript
+// sign
+jwt.sign({ userId: user.id, role: user.role }, JWT_SECRET, { expiresIn: "7d" });
+
+// verify
+const decoded = jwt.verify(token, JWT_SECRET) as { userId: string; role: string };
+//                                                           ^^^^^^ was number
+```
+
+### What a UUID looks like in responses
+
+```json
+{
+  "id": "a3f8c2d1-4b5e-4f6a-8c9d-1e2f3a4b5c6d",
+  "name": "Alice",
+  "email": "alice@gmail.com"
+}
+```
+
+URLs look like:
+```
+GET /v1/users/a3f8c2d1-4b5e-4f6a-8c9d-1e2f3a4b5c6d
+```
+
+### Int vs UUID — when to use each
+
+| | Int (autoincrement) | UUID |
+|--|--------------------|---------|
+| Readable | ✅ Short, simple | ❌ Long string |
+| Secure | ❌ Predictable | ✅ Unguessable |
+| Performance | ✅ Slightly faster index | ❌ Slightly slower |
+| Distributed systems | ❌ Collisions possible | ✅ Globally unique |
+| Best for | Internal tools, small apps | Public APIs, production apps |
+
+For any public-facing API — use UUID.
 
 ---
 
@@ -22,7 +194,7 @@
 
 Once your API is live and clients are using it, you cannot freely change it. If you rename a field, remove an endpoint, or change a response structure, every client that depends on the old behavior breaks.
 
-**API versioning** lets you introduce changes without breaking existing clients. You maintain multiple versions simultaneously — old clients stay on v1, new clients use v2.
+**API versioning** lets you introduce breaking changes without breaking existing clients. You maintain multiple versions simultaneously — old clients stay on v1, new clients use v2.
 
 This is why versioning must happen **before deployment** — adding it after means changing all your URLs, which is itself a breaking change.
 
@@ -30,19 +202,51 @@ This is why versioning must happen **before deployment** — adding it after mea
 
 A breaking change is anything that causes existing clients to stop working:
 
-- Renaming a field: `pricePerNight` → `price`
-- Removing a field from a response
-- Changing a field's type: `id` from `number` to `string`
-- Removing an endpoint
-- Changing required fields on a request body
+| Change | Why it breaks clients |
+|--------|----------------------|
+| Renaming a field: `pricePerNight` → `price` | Client code reading `pricePerNight` gets `undefined` |
+| Removing a field from a response | Client code that depends on it breaks |
+| Changing a field's type: `id` from `number` to `string` | Type checks and comparisons fail |
+| Removing an endpoint | Client gets 404 |
+| Changing required fields on a request body | Client requests start failing with 400 |
+| Changing authentication method | All authenticated requests fail |
 
 ### What is NOT a breaking change?
 
 These are safe to deploy without a new version:
 
-- Adding a new optional field to a response
-- Adding a new endpoint
-- Bug fixes that don't change the contract
+- Adding a new **optional** field to a response — clients that don't know about it just ignore it
+- Adding a new endpoint — existing clients don't call it
+- Bug fixes that don't change the response contract
+- Performance improvements
+- Adding optional query parameters
+
+### Versioning strategies
+
+There are three common approaches to API versioning:
+
+**1. URL Path Versioning** — version in the URL
+```
+GET /v1/listings
+GET /v2/listings
+```
+Pros: visible, easy to test, easy to route. Used by Stripe, GitHub, Twilio.
+Cons: URLs change between versions.
+
+**2. Header Versioning** — version in a request header
+```
+GET /listings
+API-Version: 2
+```
+Pros: clean URLs. Cons: harder to test in a browser, less visible.
+
+**3. Query Parameter Versioning** — version as a query param
+```
+GET /listings?version=2
+```
+Pros: easy to test. Cons: pollutes query params, not RESTful.
+
+**URL path versioning is the industry standard** — it is what we use in this course.
 
 ---
 
@@ -52,122 +256,221 @@ The golden rule: **structure your routes with a version prefix from day one**, e
 
 ```typescript
 // ✅ Do this from the start — easy to add v2 later
-app.use("/v1/users", usersRouter);
-app.use("/v1/listings", listingsRouter);
+app.use("/v1", v1Router);
 
 // ❌ Don't do this — adding versioning later is a breaking change
 app.use("/users", usersRouter);
 app.use("/listings", listingsRouter);
 ```
 
-If you deploy without versioning and later need to add it, you have to change all your URLs — which breaks every client already using your API.
+If you deploy without versioning and later need to add it, you have to change all your URLs — which breaks every client already using your API. You'd need to release a "v1" that is identical to what you had, just to give clients time to update their URLs. That's wasted effort that's entirely avoidable.
+
+**Real-world example:** Twitter's API launched without versioning. When they added it, they had to maintain both `/users` and `/1/users` simultaneously for years while clients migrated. Don't repeat that mistake.
 
 ---
 
 ## URL Path Versioning in Express
 
-URL path versioning is the most common approach — the version is part of the URL: `/v1/listings`, `/v2/listings`. It is visible, easy to test, and used by Stripe, GitHub, and Twilio.
+URL path versioning is the most common approach — the version is part of the URL: `/v1/listings`, `/v2/listings`. It is explicit, easy to test in Postman or a browser, and used by Stripe, GitHub, and Twilio.
 
-### Group all routes under a version router
+### Project structure
 
-**src/routes/v1/index.ts:**
+Organize your routes and controllers by version from the start:
+
+```
+src/
+├── controllers/
+│   └── v1/
+│       ├── auth.controller.ts
+│       ├── users.controller.ts
+│       ├── listings.controller.ts
+│       └── bookings.controller.ts
+├── routes/
+│   └── v1/
+│       ├── index.ts              ← groups all v1 routes
+│       ├── auth.routes.ts
+│       ├── users.routes.ts
+│       ├── listings.routes.ts
+│       └── bookings.routes.ts
+└── index.ts
+```
+
+When breaking changes are needed, you add `v2/` alongside `v1/` — the old version stays untouched.
+
+### Create the v1 router
+
+**src/routes/v1/index.ts** — groups all v1 routes into a single router:
+
 ```typescript
 import { Router } from "express";
+import authRouter from "./auth.routes.js";
 import usersRouter from "./users.routes.js";
 import listingsRouter from "./listings.routes.js";
 import bookingsRouter from "./bookings.routes.js";
-import authRouter from "./auth.routes.js";
 
 const v1Router = Router();
 
+v1Router.use("/auth", authRouter);
 v1Router.use("/users", usersRouter);
 v1Router.use("/listings", listingsRouter);
 v1Router.use("/bookings", bookingsRouter);
-v1Router.use("/auth", authRouter);
 
 export default v1Router;
 ```
 
-**src/index.ts:**
+### Mount in index.ts
+
 ```typescript
 import v1Router from "./routes/v1/index.js";
 
 app.use("/v1", v1Router);
 ```
 
-Now all your endpoints are under `/v1/...`. When you have breaking changes later, you create a `v2Router` the same way and mount it under `/v2`.
-
-### Folder structure
+Now all endpoints are under `/v1/...`:
 
 ```
-src/
-├── routes/
-│   ├── v1/
-│   │   ├── index.ts          ← groups all v1 routes
-│   │   ├── auth.routes.ts
-│   │   ├── users.routes.ts
-│   │   ├── listings.routes.ts
-│   │   └── bookings.routes.ts
-│   └── v2/                   ← created when you have breaking changes
-├── controllers/
-│   ├── v1/
-│   └── v2/
-└── index.ts
+POST   /v1/auth/register
+POST   /v1/auth/login
+GET    /v1/users
+GET    /v1/users/:id
+GET    /v1/listings
+POST   /v1/listings
+DELETE /v1/bookings/:id
 ```
 
-### Redirect unversioned routes to latest version
+### Adding v2 later
+
+When you have breaking changes, create a `v2` folder. You only need to create files for the routes that actually changed — everything else can be re-exported from v1:
+
+```
+src/routes/
+├── v1/
+│   ├── index.ts
+│   ├── auth.routes.ts
+│   ├── users.routes.ts
+│   └── listings.routes.ts
+└── v2/
+    ├── index.ts
+    └── listings.routes.ts   ← only this changed in v2
+```
+
+**src/routes/v2/index.ts:**
+```typescript
+import { Router } from "express";
+import authRouter from "../v1/auth.routes.js";    // reuse v1 — unchanged
+import usersRouter from "../v1/users.routes.js";  // reuse v1 — unchanged
+import listingsRouter from "./listings.routes.js"; // new v2 version
+
+const v2Router = Router();
+
+v2Router.use("/auth", authRouter);
+v2Router.use("/users", usersRouter);
+v2Router.use("/listings", listingsRouter); // v2 listings with breaking changes
+
+export default v2Router;
+```
+
+**src/index.ts:**
+```typescript
+import v1Router from "./routes/v1/index.js";
+import v2Router from "./routes/v2/index.js";
+
+app.use("/v1", v1Router);
+app.use("/v2", v2Router);
+```
+
+Both versions run simultaneously. Old clients on `/v1` are unaffected. New clients use `/v2`.
+
+### Redirect unversioned routes
 
 If a client calls `/listings` without a version, redirect them to the latest:
 
 ```typescript
-// Before versioned routes in index.ts
 app.use("/listings", (req, res) => {
   res.redirect(301, `/v1/listings${req.url}`);
 });
 ```
 
-301 Moved Permanently tells clients and search engines the resource has permanently moved.
+`301 Moved Permanently` tells clients and search engines the resource has permanently moved.
 
 ---
 
 ## Deprecation Headers
 
-When you release v2, you do not remove v1 immediately. You **deprecate** it — warn clients it will be removed, giving them time to migrate.
+When you release v2, you do not remove v1 immediately. You **deprecate** it — warn clients it will be removed, giving them time to migrate. The standard way to communicate this is through HTTP response headers.
 
-Add a deprecation middleware to all v1 routes:
+### The deprecation headers
 
+```
+Deprecation: true
+Sunset: Sat, 01 Jan 2026 00:00:00 GMT
+Link: </v2>; rel="successor-version"
+```
+
+- `Deprecation: true` — signals this version is deprecated
+- `Sunset` — the exact date and time the version will be shut down
+- `Link` — points clients to the replacement version
+
+These are standardized headers defined in [RFC 8594](https://datatracker.ietf.org/doc/html/rfc8594). Well-built API clients check for these headers and can alert developers automatically.
+
+### Implement the deprecation middleware
+
+**src/middlewares/deprecation.middleware.ts:**
 ```typescript
-// src/middlewares/deprecation.middleware.ts
 import type { Request, Response, NextFunction } from "express";
 
 export function deprecateV1(req: Request, res: Response, next: NextFunction) {
   res.setHeader("Deprecation", "true");
-  res.setHeader("Sunset", "Sat, 01 Jan 2026 00:00:00 GMT"); // removal date
+  res.setHeader("Sunset", "Sat, 01 Jan 2026 00:00:00 GMT");
   res.setHeader("Link", '</v2>; rel="successor-version"');
   next();
 }
 ```
 
-Apply it in `index.ts`:
+### Apply when v2 is released
 
 ```typescript
 import { deprecateV1 } from "./middlewares/deprecation.middleware.js";
 
-app.use("/v1", deprecateV1, v1Router); // every v1 response includes deprecation headers
+// Every v1 response now includes deprecation headers
+app.use("/v1", deprecateV1, v1Router);
 app.use("/v2", v2Router);
 ```
 
-When the sunset date arrives, return 410 Gone for all v1 requests:
+### Sunset — shut down v1
+
+When the sunset date arrives, replace v1 with a `410 Gone` response:
 
 ```typescript
-app.use("/v1", (req, res) => {
+app.use("/v1", (req: Request, res: Response) => {
   res.status(410).json({
     error: "API v1 has been discontinued. Please migrate to /v2.",
+    migration_guide: "https://your-app.com/docs/migration-v1-to-v2",
   });
 });
 ```
 
-410 Gone is the correct status — it means the resource existed but has been permanently removed.
+`410 Gone` is the correct status code — it means the resource existed but has been permanently removed. This is different from `404 Not Found` which means it never existed.
+
+### Versioning lifecycle
+
+```
+Phase 1 — Active
+  /v1 works normally
+  /v2 does not exist yet
+
+Phase 2 — v2 Released
+  /v1 works + sends Deprecation + Sunset headers
+  /v2 works normally
+  Clients have time to migrate
+
+Phase 3 — v1 Sunset
+  /v1 returns 410 Gone
+  /v2 works normally
+  Migration complete
+```
+
+Give clients at least **6 months** between deprecation and sunset. Enterprise clients may need longer.
 
 ---
 
@@ -729,6 +1032,9 @@ App live at https://your-app.railway.app
 
 | Concept | What it is |
 |---------|------------|
+| UUID | Universally Unique Identifier — random string ID, unguessable, used in production APIs |
+| `@default(uuid())` | Prisma attribute that auto-generates a UUID for each new record |
+| Int autoincrement | Sequential integer IDs — predictable and not safe for public APIs |
 | API Versioning | Maintaining multiple versions so breaking changes don't break existing clients |
 | Breaking change | Any change that causes existing clients to stop working |
 | URL path versioning | Version in the URL: `/v1/listings` — most common approach |

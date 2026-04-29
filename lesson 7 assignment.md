@@ -1,12 +1,206 @@
-# Lesson 7 Assignment: Deploy Airbnb API to Production
+# Lesson 7 Assignment: UUID Migration, API Versioning & Deployment
 
 ## Overview
 
-Deploy your Airbnb API to a live production server with a hosted PostgreSQL database. Migrate all your local database schema and data to production. By the end, your API is publicly accessible on the internet with full functionality.
+Migrate your Airbnb API IDs from integers to UUIDs, add API versioning, and deploy to a live production server. By the end, your API is publicly accessible with versioned routes and UUID-based IDs.
 
 ---
 
-## Part 1 — Prepare for Production
+## Part 1 — Migrate IDs from Int to UUID
+
+### 1. Update the Prisma schema
+
+Change every model's `id` from `Int @default(autoincrement())` to `String @default(uuid())`. Also change all foreign key fields from `Int` to `String`:
+
+```prisma
+model User {
+  id        String    @id @default(uuid())
+  name      String
+  email     String    @unique
+  username  String    @unique
+  password  String
+  role      Role      @default(GUEST)
+  listings  Listing[]
+  bookings  Booking[]
+  reviews   Review[]
+  createdAt DateTime  @default(now())
+}
+
+model Listing {
+  id            String    @id @default(uuid())
+  title         String
+  description   String
+  location      String
+  pricePerNight Float
+  guests        Int
+  type          String
+  amenities     String[]
+  rating        Float?
+  userId        String
+  user          User      @relation(fields: [userId], references: [id])
+  bookings      Booking[]
+  reviews       Review[]
+  createdAt     DateTime  @default(now())
+}
+
+model Booking {
+  id        String   @id @default(uuid())
+  checkIn   DateTime
+  checkOut  DateTime
+  total     Float
+  status    String   @default("confirmed")
+  userId    String
+  listingId String
+  user      User     @relation(fields: [userId], references: [id])
+  listing   Listing  @relation(fields: [listingId], references: [id])
+  createdAt DateTime @default(now())
+}
+
+model Review {
+  id        String   @id @default(uuid())
+  rating    Int
+  comment   String
+  userId    String
+  listingId String
+  user      User     @relation(fields: [userId], references: [id])
+  listing   Listing  @relation(fields: [listingId], references: [id])
+  createdAt DateTime @default(now())
+}
+```
+
+### 2. Reset and migrate
+
+```bash
+npx prisma migrate reset
+npx prisma migrate dev --name change_ids_to_uuid
+```
+
+### 3. Update all controllers
+
+Remove all `parseInt()` calls — IDs are now strings:
+
+```typescript
+// ❌ Before
+const id = parseInt(req.params["id"] as string);
+
+// ✅ After
+const id = req.params["id"] as string;
+```
+
+Do this in every controller: `users`, `listings`, `bookings`, `reviews`.
+
+### 4. Update TypeScript types
+
+Update `AuthRequest` in `auth.middleware.ts`:
+
+```typescript
+export interface AuthRequest extends Request {
+  userId?: string;  // was number
+  role?: string;
+}
+```
+
+Update the JWT payload type:
+
+```typescript
+const decoded = jwt.verify(token, JWT_SECRET) as { userId: string; role: string };
+```
+
+### 5. Verify UUID responses
+
+Test `POST /auth/register` — the `id` in the response should now be a UUID:
+
+```json
+{
+  "id": "a3f8c2d1-4b5e-4f6a-8c9d-1e2f3a4b5c6d",
+  "name": "Alice",
+  "email": "alice@gmail.com"
+}
+```
+
+Test `GET /users/:id` with a UUID — should return the correct user.
+
+---
+
+## Part 2 — Add API Versioning
+
+### 1. Restructure routes folder
+
+Move all route files into a `v1` subfolder:
+
+```
+src/routes/
+└── v1/
+    ├── index.ts
+    ├── auth.routes.ts
+    ├── users.routes.ts
+    ├── listings.routes.ts
+    ├── bookings.routes.ts
+    └── reviews.routes.ts
+```
+
+### 2. Create the v1 index router
+
+**src/routes/v1/index.ts:**
+```typescript
+import { Router } from "express";
+import authRouter from "./auth.routes.js";
+import usersRouter from "./users.routes.js";
+import listingsRouter from "./listings.routes.js";
+import bookingsRouter from "./bookings.routes.js";
+import reviewsRouter from "./reviews.routes.js";
+
+const v1Router = Router();
+
+v1Router.use("/auth", authRouter);
+v1Router.use("/users", usersRouter);
+v1Router.use("/listings", listingsRouter);
+v1Router.use("/bookings", bookingsRouter);
+v1Router.use("/reviews", reviewsRouter);
+
+export default v1Router;
+```
+
+### 3. Mount v1 in index.ts
+
+```typescript
+import v1Router from "./routes/v1/index.js";
+
+app.use("/v1", v1Router);
+```
+
+### 4. Add deprecation middleware
+
+Create `src/middlewares/deprecation.middleware.ts`:
+
+```typescript
+import type { Request, Response, NextFunction } from "express";
+
+export function deprecateV1(req: Request, res: Response, next: NextFunction) {
+  res.setHeader("Deprecation", "true");
+  res.setHeader("Sunset", "Sat, 01 Jan 2026 00:00:00 GMT");
+  res.setHeader("Link", '</v2>; rel="successor-version"');
+  next();
+}
+```
+
+### 5. Verify versioned routes
+
+All endpoints should now be under `/v1/`:
+
+```
+POST /v1/auth/register
+POST /v1/auth/login
+GET  /v1/users
+GET  /v1/listings
+POST /v1/bookings
+```
+
+Test each one in Postman — confirm they all work with the `/v1` prefix.
+
+---
+
+## Part 3 — Prepare for Production
 
 ### 1. Update package.json scripts
 
@@ -98,7 +292,7 @@ If it works locally, it will work in production.
 
 ---
 
-## Part 2 — Verify Migrations
+## Part 4 — Verify Migrations
 
 ### 1. Check all migrations are committed
 
@@ -152,7 +346,7 @@ Restore your original `DATABASE_URL` after testing.
 
 ---
 
-## Part 3 — Deploy to Railway
+## Part 5 — Deploy to Railway
 
 ### 1. Push to GitHub
 
@@ -222,7 +416,7 @@ Your app is live at `https://your-app.railway.app`.
 
 ---
 
-## Part 4 — Verify Deployment
+## Part 6 — Verify Deployment
 
 Test every critical endpoint in production:
 
@@ -303,7 +497,7 @@ Should return filtered listings
 
 ---
 
-## Part 5 — Database Verification
+## Part 7 — Database Verification
 
 ### 1. Check migrations ran
 
@@ -342,7 +536,7 @@ Should show the test data you created in Part 4.
 
 ---
 
-## Part 6 — Continuous Deployment
+## Part 8 — Continuous Deployment
 
 Now that your app is deployed, every `git push` triggers a new deployment automatically.
 
@@ -376,7 +570,7 @@ Now that your app is deployed, every `git push` triggers a new deployment automa
 
 ---
 
-## Part 7 — Alternative: Deploy to Render
+## Part 9 — Alternative: Deploy to Render
 
 If you prefer Render over Railway, follow these steps instead of Part 3.
 
@@ -461,6 +655,16 @@ Or use Railway's PgBouncer URL instead of the direct URL.
 
 ## Final Checklist
 
+- [ ] All model IDs changed to `String @default(uuid())`
+- [ ] All foreign keys changed from `Int` to `String`
+- [ ] All `parseInt()` calls removed from controllers
+- [ ] `AuthRequest.userId` updated to `string`
+- [ ] JWT payload type updated to `{ userId: string; role: string }`
+- [ ] UUID responses verified in Postman
+- [ ] All routes moved to `src/routes/v1/`
+- [ ] `v1Router` created and mounted at `/v1`
+- [ ] Deprecation middleware created
+- [ ] All endpoints work under `/v1/` prefix
 - [ ] `npm run build` compiles without errors locally
 - [ ] `npm start` runs the compiled output locally
 - [ ] All migrations are committed to Git
@@ -473,8 +677,8 @@ Or use Railway's PgBouncer URL instead of the direct URL.
 - [ ] `NODE_ENV=production` is set in the platform
 - [ ] All environment variables are set in the platform
 - [ ] App is accessible at the public URL
-- [ ] Swagger UI works in production
-- [ ] Can register, login, and access protected routes
+- [ ] Swagger UI works in production at `/api-docs`
+- [ ] Can register, login, and access protected routes via `/v1/`
 - [ ] Database migrations ran successfully
 - [ ] Continuous deployment works (push triggers redeploy)
 
@@ -482,12 +686,13 @@ Or use Railway's PgBouncer URL instead of the direct URL.
 
 ## What You Should Practice
 
+- Migrating integer IDs to UUIDs in Prisma and updating all affected code
+- Understanding why UUIDs are safer than sequential integers in production APIs
+- Structuring routes with versioning from the start
 - Preparing a Node.js app for production deployment
-- Understanding the difference between development and production environments
 - Managing environment variables securely across environments
 - Using Prisma migrations to sync schema changes from local to production
 - Deploying to cloud platforms (Railway, Render)
 - Verifying deployments with health checks and endpoint testing
 - Setting up continuous deployment from GitHub
 - Troubleshooting deployment issues using platform logs
-- Connecting to production databases for verification
