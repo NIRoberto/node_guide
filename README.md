@@ -140,43 +140,43 @@ Swagger UI at `http://localhost:3000/api-docs`
 ### Auth
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| POST | `/v1/auth/register` | No | Register a new account |
-| POST | `/v1/auth/login` | No | Login and receive a JWT token |
-| GET | `/v1/auth/me` | Yes | Get the logged-in user's profile |
-| POST | `/v1/auth/change-password` | Yes | Change password |
-| POST | `/v1/auth/forgot-password` | No | Request a password reset email |
-| POST | `/v1/auth/reset-password/:token` | No | Reset password using token |
+| POST | `/api/v1/auth/register` | No | Register a new account |
+| POST | `/api/v1/auth/login` | No | Login and receive a JWT token |
+| GET | `/api/v1/auth/me` | Yes | Get the logged-in user's profile |
+| POST | `/api/v1/auth/change-password` | Yes | Change password |
+| POST | `/api/v1/auth/forgot-password` | No | Request a password reset email |
+| POST | `/api/v1/auth/reset-password/:token` | No | Reset password using token |
 
 ### Users
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| GET | `/v1/users` | Yes | Get all users |
-| GET | `/v1/users/:id` | Yes | Get a user with their listings or bookings |
-| PUT | `/v1/users/:id` | Yes | Update a user |
-| DELETE | `/v1/users/:id` | Yes | Delete a user |
-| POST | `/v1/users/:id/avatar` | Yes | Upload profile picture |
-| DELETE | `/v1/users/:id/avatar` | Yes | Remove profile picture |
+| GET | `/api/v1/users` | Yes | Get all users |
+| GET | `/api/v1/users/:id` | Yes | Get a user with their listings or bookings |
+| PUT | `/api/v1/users/:id` | Yes | Update a user |
+| DELETE | `/api/v1/users/:id` | Yes | Delete a user |
+| POST | `/api/v1/users/:id/avatar` | Yes | Upload profile picture |
+| DELETE | `/api/v1/users/:id/avatar` | Yes | Remove profile picture |
 
 ### Listings
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| GET | `/v1/listings` | No | Get all listings (filter, paginate, sort) |
-| GET | `/v1/listings/:id` | No | Get a single listing |
-| POST | `/v1/listings` | Yes (HOST) | Create a listing |
-| PUT | `/v1/listings/:id` | Yes (owner) | Update a listing |
-| DELETE | `/v1/listings/:id` | Yes (owner) | Delete a listing |
-| POST | `/v1/listings/:id/photos` | Yes (owner) | Upload listing photos |
-| DELETE | `/v1/listings/:id/photos/:photoId` | Yes (owner) | Delete a listing photo |
-| GET | `/v1/listings/stats` | No | Get listing statistics by location |
+| GET | `/api/v1/listings` | No | Get all listings (filter, paginate, sort) |
+| GET | `/api/v1/listings/:id` | No | Get a single listing |
+| POST | `/api/v1/listings` | Yes (HOST) | Create a listing |
+| PUT | `/api/v1/listings/:id` | Yes (owner) | Update a listing |
+| DELETE | `/api/v1/listings/:id` | Yes (owner) | Delete a listing |
+| POST | `/api/v1/listings/:id/photos` | Yes (owner) | Upload listing photos |
+| DELETE | `/api/v1/listings/:id/photos/:photoId` | Yes (owner) | Delete a listing photo |
+| GET | `/api/v1/listings/stats` | No | Get listing statistics by location |
 
 ### Bookings
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| GET | `/v1/bookings` | Yes | Get all bookings |
-| GET | `/v1/bookings/:id` | Yes | Get a single booking |
-| POST | `/v1/bookings` | Yes (GUEST) | Create a booking |
-| DELETE | `/v1/bookings/:id` | Yes (owner) | Cancel a booking |
-| PATCH | `/v1/bookings/:id/status` | Yes | Update booking status |
+| GET | `/api/v1/bookings` | Yes | Get all bookings |
+| GET | `/api/v1/bookings/:id` | Yes | Get a single booking |
+| POST | `/api/v1/bookings` | Yes (GUEST) | Create a booking |
+| DELETE | `/api/v1/bookings/:id` | Yes (owner) | Cancel a booking |
+| PATCH | `/api/v1/bookings/:id/status` | Yes | Update booking status |
 
 ---
 

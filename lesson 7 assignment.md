@@ -166,7 +166,7 @@ export default v1Router;
 ```typescript
 import v1Router from "./routes/v1/index.js";
 
-app.use("/v1", v1Router);
+app.use("/api/v1", v1Router);
 ```
 
 ### 4. Add deprecation middleware
@@ -179,24 +179,24 @@ import type { Request, Response, NextFunction } from "express";
 export function deprecateV1(req: Request, res: Response, next: NextFunction) {
   res.setHeader("Deprecation", "true");
   res.setHeader("Sunset", "Sat, 01 Jan 2026 00:00:00 GMT");
-  res.setHeader("Link", '</v2>; rel="successor-version"');
+  res.setHeader("Link", '</api/v2>; rel="successor-version"');
   next();
 }
 ```
 
 ### 5. Verify versioned routes
 
-All endpoints should now be under `/v1/`:
+All endpoints should now be under `/api/v1/`:
 
 ```
-POST /v1/auth/register
-POST /v1/auth/login
-GET  /v1/users
-GET  /v1/listings
-POST /v1/bookings
+POST /api/v1/auth/register
+POST /api/v1/auth/login
+GET  /api/v1/users
+GET  /api/v1/listings
+POST /api/v1/bookings
 ```
 
-Test each one in Postman — confirm they all work with the `/v1` prefix.
+Test each one in Postman — confirm they all work with the `/api/v1` prefix.
 
 ---
 
@@ -434,7 +434,7 @@ Should load the interactive documentation
 
 ### 3. Register a user
 ```
-POST https://your-app.railway.app/auth/register
+POST https://your-app.railway.app/api/v1/auth/register
 {
   "name": "Test User",
   "email": "test@example.com",
@@ -448,7 +448,7 @@ Should return `201` with the created user
 
 ### 4. Login
 ```
-POST https://your-app.railway.app/auth/login
+POST https://your-app.railway.app/api/v1/auth/login
 {
   "email": "test@example.com",
   "password": "password123"
@@ -460,7 +460,7 @@ Should return `200` with a token
 
 Copy the token from step 4, then:
 ```
-GET https://your-app.railway.app/users
+GET https://your-app.railway.app/api/v1/users
 Authorization: Bearer <your-token>
 ```
 Should return `200` with a list of users
@@ -469,7 +469,7 @@ Should return `200` with a list of users
 
 First register a host user, login, then:
 ```
-POST https://your-app.railway.app/listings
+POST https://your-app.railway.app/api/v1/listings
 Authorization: Bearer <host-token>
 {
   "title": "Cozy Apartment",
@@ -485,13 +485,13 @@ Should return `201` with the created listing
 
 ### 7. Test pagination
 ```
-GET https://your-app.railway.app/listings?page=1&limit=5
+GET https://your-app.railway.app/api/v1/listings?page=1&limit=5
 ```
 Should return paginated listings with `meta` object
 
 ### 8. Test search
 ```
-GET https://your-app.railway.app/listings/search?location=New York&type=apartment
+GET https://your-app.railway.app/api/v1/listings/search?location=New York&type=apartment
 ```
 Should return filtered listings
 
@@ -662,9 +662,9 @@ Or use Railway's PgBouncer URL instead of the direct URL.
 - [ ] JWT payload type updated to `{ userId: string; role: string }`
 - [ ] UUID responses verified in Postman
 - [ ] All routes moved to `src/routes/v1/`
-- [ ] `v1Router` created and mounted at `/v1`
+- [ ] `v1Router` created and mounted at `/api/v1`
 - [ ] Deprecation middleware created
-- [ ] All endpoints work under `/v1/` prefix
+- [ ] All endpoints work under `/api/v1/` prefix
 - [ ] `npm run build` compiles without errors locally
 - [ ] `npm start` runs the compiled output locally
 - [ ] All migrations are committed to Git
@@ -678,7 +678,7 @@ Or use Railway's PgBouncer URL instead of the direct URL.
 - [ ] All environment variables are set in the platform
 - [ ] App is accessible at the public URL
 - [ ] Swagger UI works in production at `/api-docs`
-- [ ] Can register, login, and access protected routes via `/v1/`
+- [ ] Can register, login, and access protected routes via `/api/v1/`
 - [ ] Database migrations ran successfully
 - [ ] Continuous deployment works (push triggers redeploy)
 

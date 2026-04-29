@@ -173,7 +173,7 @@ const decoded = jwt.verify(token, JWT_SECRET) as { userId: string; role: string 
 
 URLs look like:
 ```
-GET /v1/users/a3f8c2d1-4b5e-4f6a-8c9d-1e2f3a4b5c6d
+GET /api/v1/users/a3f8c2d1-4b5e-4f6a-8c9d-1e2f3a4b5c6d
 ```
 
 ### Int vs UUID — when to use each
@@ -256,7 +256,7 @@ The golden rule: **structure your routes with a version prefix from day one**, e
 
 ```typescript
 // ✅ Do this from the start — easy to add v2 later
-app.use("/v1", v1Router);
+app.use("/api/v1", v1Router);
 
 // ❌ Don't do this — adding versioning later is a breaking change
 app.use("/users", usersRouter);
@@ -323,19 +323,19 @@ export default v1Router;
 ```typescript
 import v1Router from "./routes/v1/index.js";
 
-app.use("/v1", v1Router);
+app.use("/api/v1", v1Router);
 ```
 
-Now all endpoints are under `/v1/...`:
+Now all endpoints are under `/api/v1/...`:
 
 ```
-POST   /v1/auth/register
-POST   /v1/auth/login
-GET    /v1/users
-GET    /v1/users/:id
-GET    /v1/listings
-POST   /v1/listings
-DELETE /v1/bookings/:id
+POST   /api/v1/auth/register
+POST   /api/v1/auth/login
+GET    /api/v1/users
+GET    /api/v1/users/:id
+GET    /api/v1/listings
+POST   /api/v1/listings
+DELETE /api/v1/bookings/:id
 ```
 
 ### Adding v2 later
@@ -375,8 +375,8 @@ export default v2Router;
 import v1Router from "./routes/v1/index.js";
 import v2Router from "./routes/v2/index.js";
 
-app.use("/v1", v1Router);
-app.use("/v2", v2Router);
+app.use("/api/v1", v1Router);
+app.use("/api/v2", v2Router);
 ```
 
 Both versions run simultaneously. Old clients on `/v1` are unaffected. New clients use `/v2`.
@@ -387,7 +387,7 @@ If a client calls `/listings` without a version, redirect them to the latest:
 
 ```typescript
 app.use("/listings", (req, res) => {
-  res.redirect(301, `/v1/listings${req.url}`);
+  res.redirect(301, `/api/v1/listings${req.url}`);
 });
 ```
 
@@ -404,7 +404,7 @@ When you release v2, you do not remove v1 immediately. You **deprecate** it — 
 ```
 Deprecation: true
 Sunset: Sat, 01 Jan 2026 00:00:00 GMT
-Link: </v2>; rel="successor-version"
+Link: </api/v2>; rel="successor-version"
 ```
 
 - `Deprecation: true` — signals this version is deprecated
@@ -422,7 +422,7 @@ import type { Request, Response, NextFunction } from "express";
 export function deprecateV1(req: Request, res: Response, next: NextFunction) {
   res.setHeader("Deprecation", "true");
   res.setHeader("Sunset", "Sat, 01 Jan 2026 00:00:00 GMT");
-  res.setHeader("Link", '</v2>; rel="successor-version"');
+  res.setHeader("Link", '</api/v2>; rel="successor-version"');
   next();
 }
 ```
@@ -433,8 +433,8 @@ export function deprecateV1(req: Request, res: Response, next: NextFunction) {
 import { deprecateV1 } from "./middlewares/deprecation.middleware.js";
 
 // Every v1 response now includes deprecation headers
-app.use("/v1", deprecateV1, v1Router);
-app.use("/v2", v2Router);
+app.use("/api/v1", deprecateV1, v1Router);
+app.use("/api/v2", v2Router);
 ```
 
 ### Sunset — shut down v1
@@ -442,9 +442,9 @@ app.use("/v2", v2Router);
 When the sunset date arrives, replace v1 with a `410 Gone` response:
 
 ```typescript
-app.use("/v1", (req: Request, res: Response) => {
+app.use("/api/v1", (req: Request, res: Response) => {
   res.status(410).json({
-    error: "API v1 has been discontinued. Please migrate to /v2.",
+    error: "API v1 has been discontinued. Please migrate to /api/v2.",
     migration_guide: "https://your-app.com/docs/migration-v1-to-v2",
   });
 });
@@ -456,17 +456,17 @@ app.use("/v1", (req: Request, res: Response) => {
 
 ```
 Phase 1 — Active
-  /v1 works normally
-  /v2 does not exist yet
+  /api/v1 works normally
+  /api/v2 does not exist yet
 
 Phase 2 — v2 Released
-  /v1 works + sends Deprecation + Sunset headers
-  /v2 works normally
+  /api/v1 works + sends Deprecation + Sunset headers
+  /api/v2 works normally
   Clients have time to migrate
 
 Phase 3 — v1 Sunset
-  /v1 returns 410 Gone
-  /v2 works normally
+  /api/v1 returns 410 Gone
+  /api/v2 works normally
   Migration complete
 ```
 
