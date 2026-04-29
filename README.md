@@ -17,6 +17,7 @@ A complete backend development course using **Node.js**, **TypeScript**, **Expre
 | [Lesson 5](./lesson%205.md) | Swagger API Documentation | [Assignment](./lesson%205%20assignment.md) |
 | [Lesson 6](./lesson%206.md) | Deployment & Database Migration | [Assignment](./lesson%206%20assignment.md) |
 | [Lesson 7](./lesson%207.md) | API Versioning & Deployment | [Assignment](./lesson%207%20assignment.md) |
+| [Lesson 8](./lesson%208.md) | AI-Powered Features with LangChain | [Assignment](./lesson%208%20assignment.md) |
 
 ---
 
@@ -31,7 +32,8 @@ Every lesson extends the same **Airbnb API** project. By the end of the course y
 - Profile picture and listing photo uploads via Cloudinary
 - Interactive API documentation with Swagger UI
 - API versioning (v1 / v2)
-- Live deployment on Railway with a hosted database
+- Live deployment on Render with a hosted database
+- AI-powered features with LangChain (natural language search, description generator, chatbot)
 
 ---
 
@@ -51,7 +53,8 @@ Every lesson extends the same **Airbnb API** project. By the end of the course y
 | Multer | File upload parsing |
 | Cloudinary | Cloud image storage |
 | Swagger / OpenAPI | API documentation |
-| Railway | Cloud deployment |
+| LangChain | AI chains, prompts, and memory |
+| Groq | Free LLM API for AI features |
 
 ---
 
