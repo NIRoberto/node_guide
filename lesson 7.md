@@ -13,9 +13,8 @@
 10. [Database Migration Strategy](#database-migration-strategy)
 11. [Migrating from Local to Production Database](#migrating-from-local-to-production-database)
 12. [Hosted Database Options](#hosted-database-options)
-13. [Deploying to Railway](#deploying-to-railway)
-14. [Deploying to Render](#deploying-to-render)
-15. [How It All Fits Together](#how-it-all-fits-together)
+13. [Deploying to Render](#deploying-to-render)
+14. [How It All Fits Together](#how-it-all-fits-together)
 
 ---
 
@@ -791,7 +790,6 @@ Your local PostgreSQL database is only on your machine. In production you need a
 
 | Service | Free Tier | Best for |
 |---------|----------|---------|
-| **Railway PostgreSQL** | 1GB storage | Easiest — same platform as your app, `DATABASE_URL` auto-configured |
 | **Neon** | 512MB, 10 branches | Serverless PostgreSQL, great free tier, branching for dev/prod |
 | **Supabase** | 500MB | Also gives you auth, storage, and realtime out of the box |
 | **Render PostgreSQL** | 1GB (90 days free) | Same platform as your app |
@@ -808,9 +806,9 @@ Most hosted databases require SSL (`sslmode=require`). Railway and Neon add this
 
 Hosted databases have connection limits. With multiple server instances, you can hit the limit fast. Use a connection pooler:
 
-**Option 1 — PgBouncer (built into Railway and Supabase)**
+**Option 1 — PgBouncer (built into Supabase)**
 
-Railway and Supabase provide a PgBouncer URL alongside the direct URL. Use the PgBouncer URL for your app:
+Supabase provides a PgBouncer URL alongside the direct URL. Use the PgBouncer URL for your app:
 
 ```env
 DATABASE_URL="postgresql://user:pass@host:6543/db?pgbouncer=true&connection_limit=1"
@@ -1005,7 +1003,7 @@ App live at https://your-app.onrender.com
 | Neon | Serverless PostgreSQL — great free tier with branching |
 | Health check | Endpoint that returns 200 — hosting platforms use it to verify your app is running |
 | Global error handler | Last middleware — catches all unhandled errors, returns generic message |
-| PgBouncer | PostgreSQL connection pooler — built into Railway and Supabase |
+| PgBouncer | PostgreSQL connection pooler — built into Supabase |
 
 ---
 
