@@ -14,41 +14,17 @@
 
 ## Why Performance Matters
 
-A slow API is a broken API. Users leave if a page takes more than 3 seconds to load. At scale, small inefficiencies that are invisible in development become catastrophic in production.
+A slow API is a broken API. Users leave if a page takes more than 3 seconds to load. At scale, small inefficiencies become huge problems.
 
-### What "at scale" actually means
+**Common performance killers in Node.js APIs:**
+- Fetching thousands of rows when you only need 10
+- Running the same expensive query over and over
+- No indexes on columns you filter by
+- Accepting unlimited requests from a single client
+- Sending uncompressed responses over the network
+- Opening a new database connection on every request
 
-In development you test with 5 users and 20 listings. Everything is fast. Then you deploy and 10,000 users sign up. Suddenly:
-
-- `GET /listings` returns 50,000 rows — the response takes 8 seconds and crashes the mobile app trying to render it
-- Every page load hits the database 30 times because of N+1 queries
-- A single angry user writes a script that sends 500 requests per second and takes your server down
-- Your PostgreSQL server hits its connection limit and starts rejecting requests
-
-None of these problems show up in development. They only appear in production, when real users are affected.
-
-### The cost of bad performance
-
-```
-100ms response time  → users don't notice
-1s response time     → users notice a slight delay
-3s response time     → 40% of users abandon the page
-10s response time    → almost everyone leaves
-```
-
-Performance is not an optimization you add later. It is a feature you build from the start. Every technique in this lesson is something you apply as you write the code — not after.
-
-### What this lesson fixes
-
-| Problem | Fix |
-|---------|-----|
-| Returning 50,000 rows when you need 10 | Pagination |
-| Full table scan on every query | Indexing |
-| Fetching columns and rows you don't need | Query optimization |
-| Running the same expensive query 1000 times | Caching |
-| One client sending unlimited requests | Rate limiting |
-| Sending 500KB JSON when 50KB is enough | Compression |
-| Opening a new DB connection on every request | Connection pooling |
+Each section in this lesson fixes one of these problems.
 
 ---
 
@@ -56,46 +32,40 @@ Performance is not an optimization you add later. It is a feature you build from
 
 ### The Problem
 
-When you have 100,000 listings in your database and someone calls `GET /listings`, you do not want to return all 100,000 at once. That would:
-- Make PostgreSQL scan and load 100,000 rows into memory
-- Serialize all of them into a massive JSON string
-- Send hundreds of megabytes over the network
-- Crash the mobile app trying to render 100,000 items
+When you have 100,000 users in your database and someone calls `GET /users`, you don't want to return all 100,000 at once. That would:
+- Slow down the database query
+- Use huge amounts of memory
+- Send a massive response over the network
+- Crash the client trying to render it
 
-**Pagination** splits results into pages — return 20 at a time, let the client ask for the next page when they need it.
-
-### How skip and take work
-
-Prisma uses `skip` and `take` to paginate:
-- `take` — how many rows to return (your `limit`)
-- `skip` — how many rows to skip before starting
-
-```
-Page 1: skip=0,  take=20  → rows 1-20
-Page 2: skip=20, take=20  → rows 21-40
-Page 3: skip=40, take=20  → rows 41-60
-
-skip = (page - 1) * limit
-```
+**Pagination** splits results into pages — return 20 at a time, let the client ask for the next page.
 
 ### Offset Pagination
 
-The most common approach. The client sends `page` and `limit` as query params.
+The most common approach. Uses `skip` (how many to skip) and `take` (how many to return).
+
+```
+GET /users?page=1&limit=20   → users 1-20
+GET /users?page=2&limit=20   → users 21-40
+GET /users?page=3&limit=20   → users 41-60
+```
+
+**Implementation with Prisma:**
 
 ```typescript
-export const getAllListings = asyncHandler(async (req: Request, res: Response) => {
-  const page  = parseInt(req.query["page"]  as string) || 1;
+// GET /users?page=1&limit=20
+export async function getAllUsers(req: Request, res: Response) {
+  const page = parseInt(req.query["page"] as string) || 1;
   const limit = parseInt(req.query["limit"] as string) || 20;
-  const skip  = (page - 1) * limit;
+  const skip = (page - 1) * limit;
 
-  // Run both queries at the same time — don't wait for one before starting the other
-  const [listings, total] = await Promise.all([
-    prisma.listing.findMany({ skip, take: limit }),
-    prisma.listing.count(),
+  const [users, total] = await Promise.all([
+    prisma.user.findMany({ skip, take: limit }),
+    prisma.user.count(),
   ]);
 
   res.json({
-    data: listings,
+    data: users,
     meta: {
       total,
       page,
@@ -103,22 +73,7 @@ export const getAllListings = asyncHandler(async (req: Request, res: Response) =
       totalPages: Math.ceil(total / limit),
     },
   });
-});
-```
-
-**Why `Promise.all` here?**
-
-You need two things: the page of data AND the total count (to calculate `totalPages`). These two queries are completely independent — one doesn't need the result of the other. Running them in parallel cuts the response time roughly in half.
-
-```
-// Sequential — wasteful
-const listings = await prisma.listing.findMany(...); // wait 20ms
-const total    = await prisma.listing.count();       // wait another 15ms
-// total: ~35ms
-
-// Parallel — efficient
-const [listings, total] = await Promise.all([...]);  // both run at the same time
-// total: ~20ms
+}
 ```
 
 **Response:**
@@ -127,57 +82,39 @@ const [listings, total] = await Promise.all([...]);  // both run at the same tim
   "data": [...],
   "meta": {
     "total": 500,
-    "page": 2,
+    "page": 1,
     "limit": 20,
     "totalPages": 25
   }
 }
 ```
 
-The `meta` object is what the frontend uses to render page numbers, "next" buttons, and "showing 21-40 of 500" labels.
-
-### Always cap the limit
-
-Never let the client request unlimited rows. A client could send `limit=999999` and bypass your pagination entirely.
-
-```typescript
-const limit = Math.min(parseInt(req.query["limit"] as string) || 20, 100);
-//                     ↑ what client asked for                    ↑ maximum allowed
-```
-
-This caps the limit at 100 regardless of what the client sends.
+The `meta` object tells the client how many pages exist so it can render pagination controls.
 
 ### Cursor Pagination
 
-Offset pagination has a hidden problem with large datasets. When you do `skip=10000, take=20`, PostgreSQL still has to scan and discard 10,000 rows before returning your 20. The bigger the page number, the slower the query.
-
-**Cursor pagination** solves this. Instead of skipping rows, you use the last item's `id` as a bookmark — PostgreSQL jumps directly to that point.
+Better for large datasets and real-time data. Instead of skipping rows, you use the last item's `id` as a cursor.
 
 ```
-First page:  no cursor         → returns items 1-20, last id = "abc123"
-Next page:   cursor=abc123     → returns items after abc123
-Next page:   cursor=xyz789     → returns items after xyz789
+GET /users?cursor=50&limit=20   → users after id 50
 ```
 
 ```typescript
-export const getAllListings = asyncHandler(async (req: Request, res: Response) => {
-  const cursor = req.query["cursor"] as string | undefined;
-  const limit  = Math.min(parseInt(req.query["limit"] as string) || 20, 100);
+export async function getAllUsers(req: Request, res: Response) {
+  const cursor = req.query["cursor"] ? parseInt(req.query["cursor"] as string) : undefined;
+  const limit = parseInt(req.query["limit"] as string) || 20;
 
-  const listings = await prisma.listing.findMany({
+  const users = await prisma.user.findMany({
     take: limit,
-    skip: cursor ? 1 : 0,           // skip the cursor item itself
+    skip: cursor ? 1 : 0,
     cursor: cursor ? { id: cursor } : undefined,
-    orderBy: { id: "asc" },         // must always order by the cursor field
+    orderBy: { id: "asc" },
   });
 
-  // If we got a full page, there are more items — send the last id as the next cursor
-  const nextCursor = listings.length === limit
-    ? listings[listings.length - 1]?.id
-    : null;  // null means no more pages
+  const nextCursor = users.length === limit ? users[users.length - 1]?.id : null;
 
-  res.json({ data: listings, nextCursor });
-});
+  res.json({ data: users, nextCursor });
+}
 ```
 
 ### Which to use?
@@ -187,11 +124,9 @@ export const getAllListings = asyncHandler(async (req: Request, res: Response) =
 | Simple to implement | ✅ | ❌ |
 | Works with page numbers | ✅ | ❌ |
 | Fast on large datasets | ❌ | ✅ |
-| Consistent with real-time inserts | ❌ | ✅ |
-| Shows total page count | ✅ | ❌ |
+| Handles real-time data | ❌ | ✅ |
 
-Use **offset** for admin dashboards, search results, and any UI with page numbers.
-Use **cursor** for feeds, infinite scroll, and tables with millions of rows.
+Use offset for admin dashboards and simple lists. Use cursor for feeds, infinite scroll, and large tables.
 
 ---
 
@@ -199,103 +134,66 @@ Use **cursor** for feeds, infinite scroll, and tables with millions of rows.
 
 ### The Problem
 
-Without an index, every query does a **full table scan** — PostgreSQL reads every single row from top to bottom to find matches. With 10 rows this is instant. With 1,000,000 rows this takes hundreds of milliseconds.
+Without indexes, every query scans the entire table row by row to find matches. With 1 million users, `WHERE email = 'alice@gmail.com'` checks all 1 million rows.
+
+An **index** is a data structure that makes lookups fast — like the index at the back of a book. Instead of reading every page, you jump straight to the right one.
+
+### How slow is it without an index?
 
 ```
-SELECT * FROM listings WHERE location = 'Kigali';
-
-Without index: PostgreSQL reads all 1,000,000 rows → finds 200 matches → ~500ms
-With index:    PostgreSQL jumps directly to Kigali rows → ~1ms
+Table with 1,000,000 rows
+No index:    ~500ms  (full table scan)
+With index:  ~1ms    (index lookup)
 ```
-
-An **index** is a separate data structure PostgreSQL maintains alongside your table. Think of it like the index at the back of a textbook — instead of reading every page to find "pagination", you look it up in the index and jump straight to page 47.
-
-### What an index actually looks like
-
-When you add `@@index([location])` to your Listing model, PostgreSQL creates a B-tree structure that looks roughly like:
-
-```
-Kigali    → [row 3, row 17, row 42, row 89, ...]
-Musanze   → [row 5, row 23, row 67, ...]
-Nyamirambo → [row 8, row 31, ...]
-```
-
-When you query `WHERE location = 'Kigali'`, PostgreSQL looks up "Kigali" in this structure in O(log n) time and gets the exact row pointers — no scanning needed.
-
-### The cost of indexes
-
-Indexes are not free. Every time you INSERT, UPDATE, or DELETE a row, PostgreSQL must also update every index on that table. More indexes = slower writes.
-
-```
-No indexes:    INSERT takes 2ms,  SELECT takes 500ms
-With indexes:  INSERT takes 5ms,  SELECT takes 1ms
-```
-
-For read-heavy APIs (most APIs are), this tradeoff is almost always worth it. But don't add indexes blindly on every column.
 
 ### Adding indexes in Prisma
 
 ```prisma
+model User {
+  id       Int    @id @default(autoincrement())
+  name     String
+  email    String @unique   // @unique automatically creates an index
+  username String @unique
+
+  @@index([name])           // index on name column
+}
+
 model Listing {
-  id            String   @id @default(uuid())
-  title         String
-  location      String
-  pricePerNight Float
-  type          String
-  hostId        String
-  createdAt     DateTime @default(now())
+  id        Int    @id @default(autoincrement())
+  title     String
+  location  String
+  userId    Int
 
-  host     User      @relation(fields: [hostId], references: [id])
-
-  // Always index foreign keys — you almost always query by them
-  @@index([hostId])
-
-  // Index columns you filter by often
-  @@index([location])
-  @@index([type])
-  @@index([pricePerNight])
-
-  // Composite index — when you frequently filter by BOTH location AND type together
-  @@index([location, type])
+  @@index([userId])         // index on userId — always index foreign keys
+  @@index([location])       // index on location — if you filter by it often
 }
 ```
 
-After adding indexes, create and apply the migration:
+After adding indexes, run:
 ```bash
 npx prisma migrate dev --name add_indexes
 ```
 
-### Composite indexes
+### When to add an index
 
-A composite index covers multiple columns together. It is useful when you frequently filter by two columns at the same time.
+Add an index on a column when you:
+- Filter by it in `WHERE` clauses (`where: { email }`)
+- Sort by it in `ORDER BY` (`orderBy: { createdAt: 'desc' }`)
+- Use it as a foreign key (`userId`, `listingId`)
+- Search by it frequently
 
-```typescript
-// This query benefits from @@index([location, type])
-prisma.listing.findMany({
-  where: { location: "Kigali", type: "APARTMENT" }
-});
+**Don't** add indexes on every column — they slow down writes (INSERT, UPDATE, DELETE) because the index has to be updated too.
 
-// This query does NOT benefit from @@index([location, type])
-// because type is the second column — the index only helps if location is included
-prisma.listing.findMany({
-  where: { type: "APARTMENT" }  // needs its own @@index([type])
-});
-```
+### Rule of thumb
 
-Rule: a composite index `[a, b]` helps queries that filter by `a` alone or `a + b` together. It does NOT help queries that filter by `b` alone.
-
-### When to add an index — the rule
-
-| Column | Index? | Why |
-|--------|--------|-----|
-| Primary key (`id`) | ✅ automatic | Always needed |
-| `@unique` fields (`email`) | ✅ automatic | Unique constraint creates one |
-| Foreign keys (`hostId`, `listingId`) | ✅ always | You almost always query by these |
-| Columns in `where` filters | ✅ yes | Direct lookup benefit |
-| Columns in `orderBy` | ✅ yes | Sorting without scanning |
-| Columns you rarely query | ❌ no | Slows writes for no benefit |
-| Boolean columns | ❌ rarely | Low cardinality — not selective enough |
-| Columns updated very frequently | ❌ careful | Index maintenance cost adds up |
+| Column type | Index? |
+|-------------|--------|
+| Primary key (`id`) | ✅ automatic |
+| `@unique` fields | ✅ automatic |
+| Foreign keys (`userId`) | ✅ always |
+| Columns you filter by often | ✅ yes |
+| Columns you rarely query | ❌ no |
+| Boolean columns | ❌ rarely worth it |
 
 ---
 
@@ -303,119 +201,74 @@ Rule: a composite index `[a, b]` helps queries that filter by `a` alone or `a + 
 
 ### Select only what you need
 
-Every column you fetch costs memory and network bandwidth. If you only need `id` and `name` to render a dropdown, don't fetch `bio`, `avatar`, `resetToken`, `createdAt`, and everything else.
+Don't fetch columns you don't use. If you only need `id` and `name`, don't fetch `bio`, `avatar`, `createdAt`, etc.
 
 ```typescript
-// ❌ fetches all columns — including password hash, reset tokens, everything
+// ❌ fetches everything
 const users = await prisma.user.findMany();
 
-// ✅ fetches only what the client actually needs
+// ✅ fetches only what's needed
 const users = await prisma.user.findMany({
   select: { id: true, name: true, email: true },
 });
 ```
 
-This matters more than it seems. A User row with all fields might be 500 bytes. With `select`, it's 80 bytes. Across 1000 rows that's 500KB vs 80KB — before compression.
-
 ### Avoid N+1 queries
 
-The N+1 problem is the most common and most damaging performance bug in backend APIs. It happens when you run one query to get a list, then run a separate query for each item in that list.
+The N+1 problem is one of the most common performance bugs. It happens when you run one query to get a list, then run another query for each item in that list.
 
 ```typescript
-// ❌ N+1 problem
-const listings = await prisma.listing.findMany(); // 1 query
-
+// ❌ N+1 problem — 1 query for listings + 1 query per listing for the user
+const listings = await prisma.listing.findMany();
 for (const listing of listings) {
-  // This runs once per listing — if there are 100 listings, that's 100 more queries
-  const host = await prisma.user.findUnique({ where: { id: listing.hostId } });
-  console.log(listing.title, host?.name);
+  const user = await prisma.user.findUnique({ where: { id: listing.userId } });
 }
-// Total: 1 + 100 = 101 queries for 100 listings
-// At 5ms per query: 505ms just for database calls
-```
+// If there are 100 listings → 101 database queries!
 
-The fix is `include` — Prisma fetches the related data in a single JOIN query:
-
-```typescript
-// ✅ 1 query with a JOIN — gets listings AND their hosts in one round trip
+// ✅ Use include — 1 query with a JOIN
 const listings = await prisma.listing.findMany({
-  include: { host: true },
+  include: { user: true },
 });
-// Total: 1 query
-// At 5ms per query: 5ms
+// 1 query total
 ```
 
-**How to spot N+1 in your code:** any `await prisma.*` call inside a loop is almost always an N+1 problem.
-
-### `include` vs `select` — know the difference
-
-These two are often confused:
+### Use `include` vs `select` wisely
 
 ```typescript
-// include — returns ALL fields of the model PLUS the related data
+// include — adds the related data on top of all fields
 const listing = await prisma.listing.findUnique({
-  where: { id },
-  include: { host: true },
-  // returns: { id, title, location, pricePerNight, ..., host: { id, name, email, password, ... } }
-  // problem: host includes password hash and other sensitive fields!
+  where: { id: 1 },
+  include: { user: true },  // adds full user object
 });
 
-// select — you control exactly which fields come back, including from relations
+// select — pick exactly what you want, including relations
 const listing = await prisma.listing.findUnique({
-  where: { id },
+  where: { id: 1 },
   select: {
-    id: true,
     title: true,
     location: true,
-    pricePerNight: true,
-    host: {
-      select: { id: true, name: true, email: true },  // only safe fields
-    },
+    user: { select: { name: true, email: true } },  // only name and email from user
   },
-  // returns exactly what you specified — nothing more
 });
 ```
-
-Use `select` when returning data to clients — it prevents accidentally leaking sensitive fields. Use `include` for internal server-side logic where you need the full object.
-
-### Filtering and sorting at the database level
-
-Never fetch all rows and filter in JavaScript. Always push filtering and sorting into the Prisma query so the database does the work.
-
-```typescript
-// ❌ Wrong — fetches ALL listings then filters in JS
-const allListings = await prisma.listing.findMany();
-const kigaliListings = allListings.filter(l => l.location === "Kigali");
-
-// ✅ Correct — database returns only Kigali listings
-const kigaliListings = await prisma.listing.findMany({
-  where: { location: { contains: "Kigali", mode: "insensitive" } },
-});
-```
-
-The wrong version loads every row into Node.js memory. The correct version lets PostgreSQL use its index and return only the matching rows.
 
 ### Run independent queries in parallel
 
-If two queries don't depend on each other, run them at the same time.
+If two queries don't depend on each other, run them at the same time with `Promise.all`.
 
 ```typescript
-// ❌ Sequential — waits for each query before starting the next
-const user     = await prisma.user.findUnique({ where: { id } });    // 15ms
-const listings = await prisma.listing.findMany({ where: { hostId: id } }); // 20ms
-const bookings = await prisma.booking.findMany({ where: { userId: id } }); // 18ms
-// Total: 15 + 20 + 18 = 53ms
+// ❌ sequential — waits for each one
+const users = await prisma.user.findMany();
+const listings = await prisma.listing.findMany();
+// total time = time(users) + time(listings)
 
-// ✅ Parallel — all three run at the same time
-const [user, listings, bookings] = await Promise.all([
-  prisma.user.findUnique({ where: { id } }),
-  prisma.listing.findMany({ where: { hostId: id } }),
-  prisma.booking.findMany({ where: { userId: id } }),
+// ✅ parallel — runs at the same time
+const [users, listings] = await Promise.all([
+  prisma.user.findMany(),
+  prisma.listing.findMany(),
 ]);
-// Total: max(15, 20, 18) = 20ms
+// total time = max(time(users), time(listings))
 ```
-
-This is a free performance win whenever you need multiple unrelated pieces of data in one request.
 
 ---
 
@@ -423,160 +276,57 @@ This is a free performance win whenever you need multiple unrelated pieces of da
 
 ### The Problem
 
-Some data is expensive to compute and doesn't change often. Listing stats, popular listings, location counts — these require aggregation queries that scan thousands of rows. Running them on every single request is wasteful.
+Some data doesn't change often — a list of cities, popular listings, user profiles. Fetching them from the database on every request is wasteful.
 
-**Caching** stores the result of an expensive operation so you can return it instantly on the next request without touching the database.
+**Caching** stores the result of an expensive operation so you can return it instantly next time without hitting the database.
 
 ```
-Without cache:
-  Request 1 → DB aggregation query (80ms) → Response
-  Request 2 → DB aggregation query (80ms) → Response
-  Request 3 → DB aggregation query (80ms) → Response
-  1000 requests → 1000 DB queries → 80,000ms of DB work
-
-With cache (TTL = 60s):
-  Request 1 → DB aggregation query (80ms) → store in cache → Response
-  Request 2 → cache hit (1ms) → Response
-  Request 3 → cache hit (1ms) → Response
-  1000 requests → 1 DB query + 999 cache hits → ~1,080ms of work
+Without cache:  Request → Database query (50ms) → Response
+With cache:     Request → Cache hit (1ms) → Response
 ```
 
-### In-memory cache
+### In-memory cache (simple, no extra tools)
 
-For simple cases, a plain JavaScript `Map` works fine. No extra dependencies, no setup. The cache lives in server memory and resets when the server restarts.
+For simple cases, a plain JavaScript `Map` works fine. Data lives in server memory and resets on restart.
 
-**src/config/cache.ts:**
 ```typescript
 const cache = new Map<string, { data: unknown; expiresAt: number }>();
 
-export function setCache(key: string, data: unknown, ttlSeconds: number): void {
-  cache.set(key, {
-    data,
-    expiresAt: Date.now() + ttlSeconds * 1000,
-  });
+function setCache(key: string, data: unknown, ttlSeconds: number) {
+  cache.set(key, { data, expiresAt: Date.now() + ttlSeconds * 1000 });
 }
 
-export function getCache<T>(key: string): T | null {
+function getCache(key: string): unknown | null {
   const entry = cache.get(key);
   if (!entry) return null;
-
-  // Check if the entry has expired
   if (Date.now() > entry.expiresAt) {
-    cache.delete(key);  // clean up expired entry
+    cache.delete(key);
     return null;
   }
-
-  return entry.data as T;
-}
-
-export function deleteCache(key: string): void {
-  cache.delete(key);
-}
-
-export function deleteCacheByPrefix(prefix: string): void {
-  // Delete all keys that start with the given prefix
-  // Useful for clearing all paginated pages of a resource at once
-  for (const key of cache.keys()) {
-    if (key.startsWith(prefix)) cache.delete(key);
-  }
+  return entry.data;
 }
 ```
 
-### Using the cache in a controller
-
+Using it in a controller:
 ```typescript
-import { getCache, setCache, deleteCache } from "../config/cache.js";
+export async function getAllListings(req: Request, res: Response) {
+  const cacheKey = "all_listings";
+  const cached = getCache(cacheKey);
 
-export const getListingStats = asyncHandler(async (req: Request, res: Response) => {
-  const cacheKey = "listing:stats";
-
-  // Check cache first
-  const cached = getCache<object>(cacheKey);
   if (cached) {
-    return res.json(cached);
+    return res.json(cached);  // return instantly from cache
   }
 
-  // Cache miss — run the expensive queries
-  const [total, avgResult, byLocation, byType] = await Promise.all([
-    prisma.listing.count(),
-    prisma.listing.aggregate({ _avg: { pricePerNight: true } }),
-    prisma.listing.groupBy({ by: ["location"], _count: { location: true } }),
-    prisma.listing.groupBy({ by: ["type"], _count: { type: true } }),
-  ]);
+  const listings = await prisma.listing.findMany();
+  setCache(cacheKey, listings, 60);  // cache for 60 seconds
 
-  const stats = {
-    totalListings: total,
-    averagePrice: avgResult._avg.pricePerNight,
-    byLocation,
-    byType,
-  };
-
-  // Store in cache for 5 minutes
-  setCache(cacheKey, stats, 300);
-
-  res.json(stats);
-});
+  res.json(listings);
+}
 ```
 
-### Cache invalidation — the hard part
+### Redis (production caching)
 
-The biggest challenge with caching is knowing when to clear it. If you cache listing stats and someone creates a new listing, the cached stats are now wrong — they show the old count.
-
-You must clear the cache whenever the underlying data changes:
-
-```typescript
-export const createListing = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const listing = await prisma.listing.create({ data: req.body });
-
-  // Clear all listing-related caches — data has changed
-  deleteCache("listing:stats");
-  deleteCacheByPrefix("listing:all:");  // clears all paginated pages
-
-  res.status(201).json(listing);
-});
-
-export const deleteListing = asyncHandler(async (req: AuthRequest, res: Response) => {
-  await prisma.listing.delete({ where: { id: req.params["id"] } });
-
-  deleteCache("listing:stats");
-  deleteCacheByPrefix("listing:all:");
-
-  res.json({ message: "Listing deleted" });
-});
-```
-
-### Cache key design
-
-Cache keys must be unique per distinct response. If your endpoint supports pagination, the cache key must include the page and limit — otherwise page 1 and page 2 would return the same cached data.
-
-```typescript
-// ❌ Wrong — same key for all pages
-const cacheKey = "listing:all";
-
-// ✅ Correct — unique key per page
-const cacheKey = `listing:all:page=${page}:limit=${limit}`;
-
-// ✅ Correct — unique key per listing
-const cacheKey = `listing:${id}`;
-
-// ✅ Correct — unique key per listing's reviews page
-const cacheKey = `listing:${id}:reviews:page=${page}:limit=${limit}`;
-```
-
-### What to cache and what not to
-
-| Cache this | Don't cache this |
-|------------|------------------|
-| Aggregation stats (counts, averages) | User-specific data (their bookings, profile) |
-| Public listing lists | Passwords, tokens, secrets |
-| Expensive `groupBy` queries | Real-time data (availability, live prices) |
-| Rarely changing config data | Data that changes on every request |
-
-### Redis — for production
-
-The in-memory cache has one major limitation: it resets when the server restarts, and it doesn't work across multiple server instances. If you have 3 server instances, each has its own separate cache — they don't share data.
-
-**Redis** is a dedicated in-memory data store that solves both problems. It runs as a separate service, persists across restarts, and all server instances share the same cache.
+For production, use **Redis** — a fast in-memory database built for caching. It survives across multiple server instances and has built-in TTL support.
 
 ```bash
 npm install redis
@@ -588,18 +338,42 @@ import { createClient } from "redis";
 const redis = createClient({ url: process.env["REDIS_URL"] });
 await redis.connect();
 
-// Set with TTL
-await redis.setEx("listing:stats", 300, JSON.stringify(stats));
+export async function getAllListings(req: Request, res: Response) {
+  const cached = await redis.get("all_listings");
 
-// Get
-const cached = await redis.get("listing:stats");
-if (cached) return res.json(JSON.parse(cached));
+  if (cached) {
+    return res.json(JSON.parse(cached));
+  }
 
-// Delete
-await redis.del("listing:stats");
+  const listings = await prisma.listing.findMany();
+  await redis.setEx("all_listings", 60, JSON.stringify(listings)); // TTL = 60s
+
+  res.json(listings);
+}
 ```
 
-For this course, the in-memory cache is sufficient. In production with multiple instances, switch to Redis.
+### Cache invalidation
+
+When data changes, you need to clear the cache so stale data isn't returned.
+
+```typescript
+export async function createListing(req: Request, res: Response) {
+  const listing = await prisma.listing.create({ data: req.body });
+
+  await redis.del("all_listings");  // clear cache when new listing is created
+
+  res.status(201).json(listing);
+}
+```
+
+### What to cache
+
+| Good to cache | Don't cache |
+|---------------|-------------|
+| Lists that change rarely | User-specific data |
+| Expensive aggregations | Passwords, tokens |
+| Public data | Real-time data |
+| Config/lookup data | Frequently changing data |
 
 ---
 

@@ -1,20 +1,24 @@
 import "dotenv/config";
 import express from "express";
 import type { Request, Response } from "express";
+import swaggerUi from "swagger-ui-express";
+import { swaggerSpec } from "./config/swagger.js";
 import usersRouter from "./routes/users.routes.js";
 import listingsRouter from "./routes/listings.routes.js";
+import authRouter from "./routes/auth.routers.js";
+import aiRouter from "./routes/ai.routes.js";
 import { prisma } from "./config/prisma.js";
 import { notFound, globalErrorHandler } from "./middlewares/errorHandler.js";
-import { authenticate, requireAdmin } from "./middlewares/auth.middleware.js";
-import dotenv from "dotenv";
-import authRouter from "./routes/auth.routers.js";
-
-dotenv.config();
+import { authenticate } from "./middlewares/auth.middleware.js";
 
 const app = express();
-const PORT = process.env.PORT;
+const PORT = process.env["PORT"] || 3000;
 
 app.use(express.json());
+app.use(express.static("public"));
+
+// ─── Swagger ──────────────────────────────────────────────────────────────────
+app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
@@ -23,8 +27,9 @@ app.get("/", (req: Request, res: Response) => {
 });
 
 app.use("/auth", authRouter);
-app.use("/users", authenticate, usersRouter);  // all user routes require auth
-app.use("/listings", listingsRouter);           // public GET, protected POST/PUT/DELETE
+app.use("/users", authenticate, usersRouter);
+app.use("/listings", listingsRouter);
+app.use("/ai", aiRouter);
 
 // ─── Error Handling ───────────────────────────────────────────────────────────
 
@@ -41,9 +46,8 @@ async function connectDb() {
       console.log(`Server running on http://localhost:${PORT}`);
     });
   } catch (error) {
-    console.log("====================================");
-    console.log(error);
-    console.log("====================================");
+    console.error("Database connection failed:", error);
+    process.exit(1);
   }
 }
 

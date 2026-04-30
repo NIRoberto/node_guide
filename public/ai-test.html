@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Features Playground</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: system-ui, sans-serif; background: #f5f5f5; color: #222; }
+      header { background: #ff385c; color: white; padding: 1rem 2rem; }
+      header h1 { font-size: 1.4rem; }
+      header p { font-size: 0.85rem; opacity: 0.85; margin-top: 2px; }
+      .tabs { display: flex; gap: 0; background: white; border-bottom: 2px solid #eee; padding: 0 2rem; }
+      .tab { padding: 0.75rem 1.25rem; cursor: pointer; font-weight: 500; color: #666; border-bottom: 3px solid transparent; margin-bottom: -2px; }
+      .tab.active { color: #ff385c; border-bottom-color: #ff385c; }
+      .panel { display: none; padding: 2rem; max-width: 800px; margin: 0 auto; }
+      .panel.active { display: block; }
+      label { display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 4px; margin-top: 1rem; }
+      input, textarea, select { width: 100%; padding: 0.6rem 0.75rem; border: 1px solid #ddd; border-radius: 8px; font-size: 0.95rem; font-family: inherit; }
+      textarea { resize: vertical; min-height: 80px; }
+      button { margin-top: 1.25rem; background: #ff385c; color: white; border: none; padding: 0.65rem 1.5rem; border-radius: 8px; font-size: 0.95rem; cursor: pointer; font-weight: 600; }
+      button:hover { background: #e0314f; }
+      button:disabled { background: #ccc; cursor: not-allowed; }
+      .result { margin-top: 1.5rem; background: #1e1e1e; color: #d4d4d4; padding: 1rem; border-radius: 8px; font-size: 0.85rem; white-space: pre-wrap; word-break: break-word; min-height: 60px; }
+      .chat-box { border: 1px solid #ddd; border-radius: 12px; background: white; overflow: hidden; }
+      .messages { height: 340px; overflow-y: auto; padding: 1rem; display: flex; flex-direction: column; gap: 0.6rem; }
+      .msg { max-width: 75%; padding: 0.6rem 0.9rem; border-radius: 16px; font-size: 0.9rem; line-height: 1.4; }
+      .msg.user { background: #ff385c; color: white; align-self: flex-end; border-bottom-right-radius: 4px; }
+      .msg.ai { background: #f0f0f0; color: #222; align-self: flex-start; border-bottom-left-radius: 4px; }
+      .chat-input { display: flex; gap: 0.5rem; padding: 0.75rem; border-top: 1px solid #eee; }
+      .chat-input input { margin: 0; flex: 1; }
+      .chat-input button { margin: 0; padding: 0.6rem 1rem; }
+      .row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+      .token-note { font-size: 0.78rem; color: #888; margin-top: 6px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>🤖 AI Features Playground</h1>
+      <p>Test the three AI-powered endpoints · <a href="/api-docs" style="color:white">Swagger Docs →</a></p>
+    </header>
+
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab('search')">🔍 Natural Language Search</div>
+      <div class="tab" onclick="switchTab('desc')">✍️ Description Generator</div>
+      <div class="tab" onclick="switchTab('chat')">💬 Chatbot</div>
+    </div>
+
+    <!-- Search -->
+    <div id="tab-search" class="panel active">
+      <label>Natural language query</label>
+      <textarea id="search-query" placeholder="e.g. cozy cabin for 4 people under $200 in Aspen"></textarea>
+      <button onclick="runSearch()">Search</button>
+      <div class="result" id="search-result">Results will appear here...</div>
+    </div>
+
+    <!-- Description Generator -->
+    <div id="tab-desc" class="panel">
+      <label>JWT Token (required)</label>
+      <input id="desc-token" type="text" placeholder="Paste your Bearer token" />
+      <p class="token-note">Login via POST /auth/login to get a token</p>
+      <div class="row">
+        <div>
+          <label>Title</label>
+          <input id="desc-title" value="Sunset Villa" />
+        </div>
+        <div>
+          <label>Location</label>
+          <input id="desc-location" value="Miami, FL" />
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>Type</label>
+          <select id="desc-type">
+            <option>VILLA</option>
+            <option>APARTMENT</option>
+            <option>HOUSE</option>
+            <option>CABIN</option>
+          </select>
+        </div>
+        <div>
+          <label>Max Guests</label>
+          <input id="desc-guests" type="number" value="6" />
+        </div>
+      </div>
+      <label>Amenities (comma-separated)</label>
+      <input id="desc-amenities" value="Pool, WiFi, Kitchen, BBQ" />
+      <label>Price per night (USD)</label>
+      <input id="desc-price" type="number" value="350" />
+      <button onclick="runDescription()">Generate Description</button>
+      <div class="result" id="desc-result">Generated description will appear here...</div>
+    </div>
+
+    <!-- Chat -->
+    <div id="tab-chat" class="panel">
+      <div class="chat-box">
+        <div class="messages" id="chat-messages">
+          <div class="msg ai">👋 Hi! I'm your Airbnb assistant. Ask me about listings, prices, or anything else!</div>
+        </div>
+        <div class="chat-input">
+          <input id="chat-input" type="text" placeholder="Ask something..." onkeydown="if(event.key==='Enter') sendChat()" />
+          <button onclick="sendChat()">Send</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const sessionId = "session-" + Math.random().toString(36).slice(2);
+
+      function switchTab(name) {
+        document.querySelectorAll(".tab").forEach((t, i) => {
+          t.classList.toggle("active", ["search", "desc", "chat"][i] === name);
+        });
+        document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
+        document.getElementById("tab-" + name).classList.add("active");
+      }
+
+      async function runSearch() {
+        const query = document.getElementById("search-query").value.trim();
+        const el = document.getElementById("search-result");
+        if (!query) return;
+        el.textContent = "Searching...";
+        try {
+          const res = await fetch("/ai/search", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ query }),
+          });
+          const data = await res.json();
+          el.textContent = JSON.stringify(data, null, 2);
+        } catch (e) {
+          el.textContent = "Error: " + e.message;
+        }
+      }
+
+      async function runDescription() {
+        const token = document.getElementById("desc-token").value.trim();
+        const el = document.getElementById("desc-result");
+        const amenities = document.getElementById("desc-amenities").value.split(",").map((s) => s.trim());
+        el.textContent = "Generating...";
+        try {
+          const res = await fetch("/ai/generate-description", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(token ? { Authorization: "Bearer " + token } : {}),
+            },
+            body: JSON.stringify({
+              title: document.getElementById("desc-title").value,
+              location: document.getElementById("desc-location").value,
+              type: document.getElementById("desc-type").value,
+              guests: Number(document.getElementById("desc-guests").value),
+              amenities,
+              price: Number(document.getElementById("desc-price").value),
+            }),
+          });
+          const data = await res.json();
+          el.textContent = data.description || JSON.stringify(data, null, 2);
+        } catch (e) {
+          el.textContent = "Error: " + e.message;
+        }
+      }
+
+      async function sendChat() {
+        const input = document.getElementById("chat-input");
+        const message = input.value.trim();
+        if (!message) return;
+        input.value = "";
+        appendMsg(message, "user");
+        appendMsg("...", "ai", "typing");
+        try {
+          const res = await fetch("/ai/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message, sessionId }),
+          });
+          const data = await res.json();
+          document.getElementById("typing")?.remove();
+          appendMsg(data.reply || JSON.stringify(data), "ai");
+        } catch (e) {
+          document.getElementById("typing")?.remove();
+          appendMsg("Error: " + e.message, "ai");
+        }
+      }
+
+      function appendMsg(text, role, id) {
+        const box = document.getElementById("chat-messages");
+        const div = document.createElement("div");
+        div.className = "msg " + role;
+        div.textContent = text;
+        if (id) div.id = id;
+        box.appendChild(div);
+        box.scrollTop = box.scrollHeight;
+      }
+    </script>
+  </body>
+</html>
