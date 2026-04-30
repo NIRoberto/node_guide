@@ -22,7 +22,7 @@ export const getAllListings = asyncHandler(async (req: Request, res: Response) =
 });
 
 export const getListingById = asyncHandler(async (req: Request, res: Response) => {
-  const id = parseInt(req.params["id"] as string);
+  const id = req.params["id"] as string;
   const listing = await prisma.listing.findUnique({
     where: { id },
     include: { host: { select: { id: true, name: true, email: true } } },
@@ -55,7 +55,7 @@ export const createListing = asyncHandler(async (req: AuthRequest, res: Response
 });
 
 export const updateListing = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const id = parseInt(req.params["id"] as string);
+  const id = req.params["id"] as string;
   const listing = await prisma.listing.findUnique({ where: { id } });
 
   if (!listing) return res.status(404).json({ error: "Listing not found" });
@@ -69,7 +69,7 @@ export const updateListing = asyncHandler(async (req: AuthRequest, res: Response
 });
 
 export const deleteListing = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const id = parseInt(req.params["id"] as string);
+  const id = req.params["id"] as string;
   const listing = await prisma.listing.findUnique({ where: { id } });
 
   if (!listing) return res.status(404).json({ error: "Listing not found" });
